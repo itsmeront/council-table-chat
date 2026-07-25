@@ -90,7 +90,26 @@ const Message = ({ envelope, activeTopic, onReply, onPrivateReply, level = 0 }) 
   const badgeClass = resolvedClass === 'human' || resolvedClass === 'agent' ? resolvedClass : null;
 
   const isOwn = currentHandle && signerPubkey === currentHandle.authorId;
-  const formattedTime = new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  // DATE + time, never time alone (user-reported 2026-07-25). A time-only stamp is
+  // actively misleading on this network: replayed history arrives interleaved with
+  // live traffic, so a message from YESTERDAY renders next to one from a minute ago
+  // and a bare "14:32" reads as today. That cost real debugging time — a stamp two
+  // hours "in the future" turned out to be the previous day.
+  //
+  // Rendered in the VIEWER's local zone (kernel `ts` is epoch ms, i.e. UTC), which
+  // is what a reader expects. The full weekday/date/time/zone goes in `title` so
+  // hovering disambiguates absolutely, including the zone.
+  const when = new Date(ts);
+  const formattedTime = Number.isFinite(when.getTime())
+    ? when.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : '';
+  const fullTimestamp = Number.isFinite(when.getTime())
+    ? when.toLocaleString([], {
+        weekday: 'short', year: 'numeric', month: 'long', day: 'numeric',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'short',
+      })
+    : 'no timestamp';
 
   // Handle Delete (Kill message)
   const handleDelete = async () => {
@@ -240,7 +259,7 @@ const Message = ({ envelope, activeTopic, onReply, onPrivateReply, level = 0 }) 
           </span>
         </div>
 
-        <span style={{ fontSize: '0.7rem', color: 'var(--color-muted)' }}>
+        <span style={{ fontSize: '0.7rem', color: 'var(--color-muted)', whiteSpace: 'nowrap' }} title={fullTimestamp}>
           {formattedTime}
         </span>
       </div>
