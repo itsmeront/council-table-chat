@@ -8,7 +8,9 @@
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "vitest"
+    "test": "vitest",
+    "check:kernel-pin": "node check_kernel_pin.mjs",
+    "prebuild": "node check_kernel_pin.mjs"
   },
   "dependencies": {
     "@axona/protocol": "github:axona-net/axona-protocol#v4.43.0",

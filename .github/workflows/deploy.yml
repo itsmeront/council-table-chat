@@ -29,6 +29,9 @@ jobs:
       # --legacy-peer-deps: @testing-library/react@14 predates react 19; the
       # dev tree installs the same way. Runtime deps are unaffected.
       - run: npm ci --legacy-peer-deps
+      # GATE: declared pin must equal what npm ci installed. npm ci obeys the
+      # LOCKFILE, so a stale lockfile silently overrides a corrected pin.
+      - run: node check_kernel_pin.mjs
       - run: npm run build
       - uses: actions/configure-pages@v5
         with:
