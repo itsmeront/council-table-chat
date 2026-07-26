@@ -9,11 +9,11 @@ import {
 
 describe('topicLink', () => {
   it('round-trips an open topic descriptor', () => {
-    const d = { region: 'useast', name: 'lobby' };
+    const d = { region: 'eagle', name: 'lobby' };
     const link = buildTopicLink(d);
     expect(link.startsWith(`${TOPIC_LINK_ORIGIN}/#topic=`)).toBe(true);
     const parsed = parseTopicLink(link);
-    expect(parsed.region).toBe('useast');
+    expect(parsed.region).toBe('eagle');
     expect(parsed.name).toBe('lobby');
     expect(parsed.write).toBe('open');
     expect(parsed.owner).toBeUndefined();

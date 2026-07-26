@@ -9,7 +9,7 @@ export const NetworkProvider = ({ children }) => {
   // newest kernel line for development.
   const [bridgeUrl, setBridgeUrl] = useState('wss://bridge.axona.net');
   const [network, setNetwork] = useState('production'); // or 'testnet'
-  const [region, setRegion] = useState('useast');
+  const [region, setRegion] = useState('eagle');
 
   const value = { 
     bridgeUrl, 

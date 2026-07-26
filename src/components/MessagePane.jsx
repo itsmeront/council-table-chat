@@ -21,7 +21,7 @@ const MessagePane = ({ onOpenModal, setReplyTarget, setPrivateReplyTarget }) => 
 
   // ONE advertisement per topic. Ads carry the kernel-derived hex topic id,
   // so compare against the active topic's hex id (same derivation the network
-  // uses — immune to region-name spelling like useast vs its canonical name).
+  // uses — immune to region-name spelling like eagle vs its canonical name).
   // Retracting/expiring the ad removes it from the store → button re-enables.
   // Mobile: the floating "☰ Topics" pill sits over the header's top-left, so
   // indent the header content past it (same 800px threshold as ChatShell).

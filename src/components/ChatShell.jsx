@@ -86,7 +86,7 @@ const ChatShell = () => {
     // right topic when properly encoded; newly created names carry no spaces.
     const linkedTopic = params.get('topic');
     if (linkedTopic && linkedTopic.trim() && !(inviteTopic && inviteKey)) {
-      const linkedRegion = params.get('region') || 'useast';
+      const linkedRegion = params.get('region') || 'eagle';
       window.history.replaceState({}, document.title, window.location.pathname);
       const descriptor = { region: linkedRegion, name: linkedTopic.trim(), write: 'open' };
       useChatStore.getState().addTopic(descriptor);
@@ -104,7 +104,7 @@ const ChatShell = () => {
         const localName = window.prompt("You received a private channel invitation! Please enter a name for this connection:");
         if (localName && localName.trim()) {
           const descriptor = {
-            region: 'useast',
+            region: 'eagle',
             name: inviteTopic,
             description: `Private chat with ${localName.trim()}`,
             mode: 'encrypted',

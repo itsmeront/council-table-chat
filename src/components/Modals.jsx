@@ -77,7 +77,7 @@ const Modals = ({ activeModal, onClose }) => {
 
     try {
       const descriptor = {
-        region: 'useast',
+        region: 'eagle',
         name: chanName.trim(),
         description: chanDesc.trim(),
         mode: chanMode,
@@ -110,7 +110,7 @@ const Modals = ({ activeModal, onClose }) => {
       } else {
         // Fallback simple link parse / name parse
         descriptor = {
-          region: 'useast',
+          region: 'eagle',
           name: joinDescriptor.trim(),
           mode: 'open',
           write: 'open'

@@ -20,8 +20,8 @@ class AxonaChatClient {
     this.peer = null;
     this.activeSubscriptions = new Map(); // topicId -> sub handle
     this.presenceInterval = null;
-    this.heartbeatTopic = { region: 'useast', name: 'axona-presence-heartbeats' };
-    this.tickerTopic = { region: 'useast', name: 'advertised-topics' };
+    this.heartbeatTopic = { region: 'eagle', name: 'axona-presence-heartbeats' };
+    this.tickerTopic = { region: 'eagle', name: 'advertised-topics' };
     this._authorClassInflight = new Set(); // signers with a getAuthorClass pull in flight
     this._declaredKey = null;              // `${authorId}:${class}` last published, to avoid re-declaring
   }
@@ -329,7 +329,7 @@ class AxonaChatClient {
   async subscribeToPrivateContinuation(topicName, key, partnerId) {
     if (!this.peer) return;
 
-    const descriptor = { region: 'useast', name: topicName, write: 'open' };
+    const descriptor = { region: 'eagle', name: topicName, write: 'open' };
     const id = await this.getTopicHexId(descriptor);
 
     if (this.activeSubscriptions.has(id)) return;
@@ -436,7 +436,7 @@ class AxonaChatClient {
     const handle = store.currentHandle;
     const activeAuthor = await this.getActiveAuthor();
 
-    const descriptor = { region: 'useast', name: conv.topic, write: 'open' };
+    const descriptor = { region: 'eagle', name: conv.topic, write: 'open' };
     const ciphertext = CryptoService.encryptSymmetric(text, conv.key);
 
     const payload = {
@@ -497,7 +497,7 @@ class AxonaChatClient {
       blurb,
       topicId: targetId,
       network: 'production',
-      region: targetDescriptor.region || 'useast',
+      region: targetDescriptor.region || 'eagle',
       mode: targetDescriptor.mode || 'open',
       owner: targetDescriptor.owner || null,
       write: targetDescriptor.write || (targetDescriptor.owner ? 'owner' : 'open'),

@@ -18,12 +18,12 @@ export const getTopicId = (descriptor) => {
 // resurrected on rejoin. Descriptors are plain JSON (including any private
 // channel's local key — consistent with handles' keys living in local
 // storage). Falls back to the four default rooms on first run.
-const AXONA_TOPIC = { region: 'useast', name: 'axona', description: 'talk to us' };
+const AXONA_TOPIC = { region: 'eagle', name: 'axona', description: 'talk to us' };
 const DEFAULT_TOPICS = [
   AXONA_TOPIC,
-  { region: 'useast', name: 'lobby', description: 'Public lobby for everyone' },
-  { region: 'useast', name: 'tech', description: 'Tech discussions' },
-  { region: 'useast', name: 'general', description: 'General chat' }
+  { region: 'eagle', name: 'lobby', description: 'Public lobby for everyone' },
+  { region: 'eagle', name: 'tech', description: 'Tech discussions' },
+  { region: 'eagle', name: 'general', description: 'General chat' }
 ];
 
 const loadPersistedTopics = () => {
@@ -95,8 +95,8 @@ export const countUnread = (state, topicId) => {
 
 export const useChatStore = create((set, get) => ({
   // Active states
-  activeTopic: { region: 'useast', name: 'lobby' }, // Default open channel
-  activeTopicId: 'useast::lobby:open',
+  activeTopic: { region: 'eagle', name: 'lobby' }, // Default open channel
+  activeTopicId: 'eagle::lobby:open',
 
   // Channels/Topics list
   subscribedTopics: loadPersistedTopics(),

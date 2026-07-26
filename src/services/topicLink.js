@@ -46,7 +46,7 @@ export const topicLabel = (descriptor) => {
  */
 export const buildTopicLink = (descriptor) => {
   if (!descriptor || !descriptor.name) return '';
-  const payload = { v: 1, r: descriptor.region || 'useast', n: descriptor.name };
+  const payload = { v: 1, r: descriptor.region || 'eagle', n: descriptor.name };
   const write = descriptor.write || (descriptor.owner ? 'owner' : 'open');
   if (write && write !== 'open') payload.w = write;      // omit the default to shorten
   if (descriptor.owner) payload.o = descriptor.owner;
@@ -84,7 +84,7 @@ export const parseTopicLink = (href) => {
     if (!p || typeof p.n !== 'string' || !p.n) return null;
     const write = p.w || (p.o ? 'owner' : 'open');
     const descriptor = {
-      region: p.r || 'useast',
+      region: p.r || 'eagle',
       name: p.n,
       write,
       network: p.net || 'production',
