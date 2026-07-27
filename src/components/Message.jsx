@@ -7,6 +7,7 @@ import AxonaChatClient from '../services/AxonaChatClient.js';
 import LinkPreview from './LinkPreview.jsx';
 import TopicLinkChip from './TopicLinkChip.jsx';
 import { isTopicLink, isAxonaName } from '../services/topicLink.js';
+import { extractUrls, isImageUrl, isYouTubeUrl } from '../services/messageUrls.js';
 
 // Long-message panel height: comfortably smaller than the viewport so a
 // single message can never dominate the list.
