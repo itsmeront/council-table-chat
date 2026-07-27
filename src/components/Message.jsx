@@ -6,7 +6,7 @@ import { useChatStore } from '../stores/useChatStore.js';
 import AxonaChatClient from '../services/AxonaChatClient.js';
 import LinkPreview from './LinkPreview.jsx';
 import TopicLinkChip from './TopicLinkChip.jsx';
-import { isTopicLink } from '../services/topicLink.js';
+import { isTopicLink, isAxonaName } from '../services/topicLink.js';
 
 // Long-message panel height: comfortably smaller than the viewport so a
 // single message can never dominate the list.
@@ -127,30 +127,24 @@ const Message = ({ envelope, activeTopic, onReply, onPrivateReply, level = 0 }) 
   const renderEmbeds = (text) => {
     if (typeof text !== 'string') return null;
 
-    // URLs in markdown bodies arrive wrapped in punctuation the regex can't
-    // know isn't part of the URL — **https://x** captures the trailing
-    // asterisks, (https://x) the paren, "https://x." the period — and the
-    // preview then fetches a mangled address. Strip trailing markdown/prose
-    // punctuation from every match.
-    const cleanUrl = (u) => u.replace(/[*_~`)\]}>.,;:!?'"]+$/, '');
+    // URL extraction lives in services/messageUrls.js — a pure function with its
+    // own regression tests, because this is exactly where the unfurl and the
+    // rendered anchor used to disagree (Joi, #general 2026-07-27): the anchor
+    // came from ReactMarkdown's parsed href while the preview came from a raw
+    // text scan that ran through the markdown syntax. Both now agree by
+    // construction — link syntax is parsed for its href, never scanned.
+    const candidates = extractUrls(text);
 
-    // Match image extensions
-    const imgRegex = /(https?:\/\/\S*\.(?:png|jpg|jpeg|gif|webp|svg))/gi;
-    const imgMatches = (text.match(imgRegex) || []).map(cleanUrl);
+    const imgMatches = candidates.filter(isImageUrl);
 
     // Match youtube links
     const ytRegex = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/i;
     const ytMatch = text.match(ytRegex);
 
-    // Match general HTTP/HTTPS URLs (and exclude direct images/youtube links)
-    const urlRegex = /https?:\/\/[^\s<>\"]+/gi;
-    const allUrls = (text.match(urlRegex) || []).map(cleanUrl);
-    const previewUrls = [...new Set(allUrls.filter(url => {
-      const isImg = /\.(?:png|jpg|jpeg|gif|webp|svg)/i.test(url);
-      const isYt = /(?:youtube\.com\/watch\?v=|youtu\.be\/)/i.test(url);
-      // Topic links render as their own chip (and would 404 a link-preview fetch).
-      return !isImg && !isYt && !isTopicLink(url);
-    }))];
+    // Topic links render as their own chip (and would 404 a link-preview fetch).
+    const previewUrls = candidates.filter(
+      (url) => !isImageUrl(url) && !isYouTubeUrl(url) && !isTopicLink(url)
+    );
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
@@ -286,7 +280,10 @@ const Message = ({ envelope, activeTopic, onReply, onPrivateReply, level = 0 }) 
             remarkPlugins={[remarkGfm, remarkBreaks]}
             components={{
               a: ({ href, children }) =>
-                isTopicLink(href) ? (
+                isAxonaName(href, children) ? (
+                  // An axona.* NAME, not an address — render as plain text.
+                  <>{children}</>
+                ) : isTopicLink(href) ? (
                   <TopicLinkChip href={href}>{children}</TopicLinkChip>
                 ) : (
                   <a href={href} target="_blank" rel="noopener noreferrer">

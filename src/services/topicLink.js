@@ -72,6 +72,42 @@ const extractToken = (url) => {
 /** True if the href looks like an Axona topic link. */
 export const isTopicLink = (href) => extractToken(href) != null;
 
+// ── axona.* names are NAMES, not addresses ────────────────────────────────────
+// Our own vocabulary is shaped like domains: the bot handle is `axona.bot`, the
+// channels are `axona.dev` / `axona.chat`, and `.bot` / `.dev` / `.chat` are all
+// real TLDs. GFM autolink literals therefore turn every mention of a handle or a
+// channel into a link to a host that does not exist (`Axona.bot` ->
+// `http://Axona.bot`). Reported live on #general 2026-07-27.
+//
+// SCOPE (deliberate): this suppresses only what the user typed BARE, i.e. what
+// the autolinker invented. An explicit `https://axona.net/whitepaper/...`, or a
+// markdown link with its own label, is a real address the author meant — those
+// still render as links. So `axona.net` mentioned in prose is text, while a
+// pasted axona.net URL still works.
+const AXONA_NAME = /^axona\.[a-z0-9][a-z0-9-]*$/i;
+
+const linkText = (children) => {
+  if (typeof children === 'string') return children;
+  if (Array.isArray(children)) return children.map(linkText).join('');
+  if (children && typeof children === 'object' && 'props' in children) return linkText(children.props?.children);
+  return '';
+};
+
+/**
+ * True when an anchor is really a bare `axona.<something>` name that the GFM
+ * autolinker promoted to a link. Requires BOTH that the visible text is such a
+ * name with no scheme of its own, AND that the href is merely that text with a
+ * scheme bolted on — so a deliberate `[axona.bot](https://…)` is left alone.
+ */
+export const isAxonaName = (href, children) => {
+  const text = linkText(children).trim();
+  if (!text || !AXONA_NAME.test(text)) return false;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(text)) return false;      // author wrote a scheme → meant an address
+  if (typeof href !== 'string') return true;                 // no href at all → plain text
+  const bare = href.replace(/^https?:\/\//i, '').replace(/\/$/, '');
+  return bare.toLowerCase() === text.toLowerCase();          // href is just the autolinked text
+};
+
 /**
  * Decode a topic link into a topic descriptor.
  * @returns {{region:string,name:string,write:string,owner?:string,network:string,label:string}|null}

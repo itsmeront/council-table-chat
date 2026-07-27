@@ -4,8 +4,7 @@ import {
   buildTopicMarkdown,
   parseTopicLink,
   isTopicLink,
-  TOPIC_LINK_ORIGIN,
-} from '../topicLink.js';
+  TOPIC_LINK_ORIGIN, isAxonaName } from '../topicLink.js';
 
 describe('topicLink', () => {
   it('round-trips an open topic descriptor', () => {
@@ -62,5 +61,46 @@ describe('topicLink', () => {
   it('buildTopicMarkdown produces a clickable markdown link', () => {
     const md = buildTopicMarkdown({ name: 'lobby' });
     expect(md).toMatch(/^\[#lobby\]\(https:\/\/axona\.chat\/#topic=/);
+  });
+});
+
+// ── axona.* names must not autolink (David 2026-07-27; Joi reported the pair) ──
+describe('isAxonaName — our vocabulary is shaped like domains', () => {
+  // GFM autolink literal: user typed the bare name, remark invented the href.
+  it('suppresses a bare handle: Axona.bot -> http://Axona.bot', () => {
+    expect(isAxonaName('http://Axona.bot', 'Axona.bot')).toBe(true);
+  });
+  it('suppresses channel names', () => {
+    expect(isAxonaName('http://axona.dev', 'axona.dev')).toBe(true);
+    expect(isAxonaName('http://axona.chat', 'axona.chat')).toBe(true);
+  });
+  it('suppresses an unknown future axona.* name (no allowlist to maintain)', () => {
+    expect(isAxonaName('http://axona.wallet', 'axona.wallet')).toBe(true);
+    expect(isAxonaName('https://axona.anything-new', 'axona.anything-new')).toBe(true);
+  });
+  it('is case-insensitive on both text and href', () => {
+    expect(isAxonaName('HTTP://AXONA.BOT', 'AXONA.bot')).toBe(true);
+  });
+
+  // The author asked for a link -> they get a link.
+  it('KEEPS an explicit URL with a path', () => {
+    expect(isAxonaName('https://axona.net/whitepaper/Axona-Whitepaper.pdf',
+                       'https://axona.net/whitepaper/Axona-Whitepaper.pdf')).toBe(false);
+  });
+  it('KEEPS a bare mention the author wrote WITH a scheme', () => {
+    expect(isAxonaName('https://axona.chat', 'https://axona.chat')).toBe(false);
+  });
+  it('KEEPS a deliberate markdown link that merely LOOKS like a name', () => {
+    expect(isAxonaName('https://axona.net/bot', 'axona.bot')).toBe(false);
+  });
+  it('leaves non-axona hosts alone', () => {
+    expect(isAxonaName('http://notes.ito.com', 'notes.ito.com')).toBe(false);
+    expect(isAxonaName('http://example.bot', 'example.bot')).toBe(false);
+  });
+  it('does not fire on prose that merely contains a name', () => {
+    expect(isAxonaName('http://axona.bot', 'ask axona.bot about it')).toBe(false);
+  });
+  it('handles React children arrays (markdown splits text nodes)', () => {
+    expect(isAxonaName('http://axona.bot', ['axona', '.bot'])).toBe(true);
   });
 });
