@@ -1,7 +1,7 @@
 {
   "name": "axona-chat",
   "private": true,
-  "version": "0.38.0",
+  "version": "0.39.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -36,8 +36,9 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.0.0",
-    "@testing-library/react": "^14.0.0",
+    "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.0.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
