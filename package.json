@@ -1,7 +1,7 @@
 {
   "name": "axona-chat",
   "private": true,
-  "version": "0.37.2",
+  "version": "0.38.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,7 +13,7 @@
     "prebuild": "node check_kernel_pin.mjs"
   },
   "dependencies": {
-    "@axona/protocol": "github:axona-net/axona-protocol#v4.43.0",
+    "@axona/protocol": "github:axona-net/axona-protocol#v4.48.0",
     "@tiptap/markdown": "^3.28.0",
     "@tiptap/react": "^3.28.0",
     "@tiptap/starter-kit": "^3.28.0",
