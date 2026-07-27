@@ -7,7 +7,7 @@ import AxonaChatClient from '../services/AxonaChatClient.js';
 import LinkPreview from './LinkPreview.jsx';
 import TopicLinkChip from './TopicLinkChip.jsx';
 import { isTopicLink, isAxonaName } from '../services/topicLink.js';
-import { extractUrls, isImageUrl, isYouTubeUrl } from '../services/messageUrls.js';
+import { extractUrls, isImageUrl, isYouTubeUrl, isAxonaNameUrl } from '../services/messageUrls.js';
 
 // Long-message panel height: comfortably smaller than the viewport so a
 // single message can never dominate the list.
@@ -143,8 +143,12 @@ const Message = ({ envelope, activeTopic, onReply, onPrivateReply, level = 0 }) 
     const ytMatch = text.match(ytRegex);
 
     // Topic links render as their own chip (and would 404 a link-preview fetch).
+    // isAxonaNameUrl: a pasted `[Axona.bot](http://Axona.bot)` reaches here as a
+    // REAL href, so suppressing the autolink in the renderer was not enough —
+    // it still built a preview card (and a favicon fetch) for a host that does
+    // not exist. Bare axona.* hosts get no card; axona.net WITH a path still does.
     const previewUrls = candidates.filter(
-      (url) => !isImageUrl(url) && !isYouTubeUrl(url) && !isTopicLink(url)
+      (url) => !isImageUrl(url) && !isYouTubeUrl(url) && !isTopicLink(url) && !isAxonaNameUrl(url)
     );
 
     return (

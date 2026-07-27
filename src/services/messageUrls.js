@@ -48,3 +48,22 @@ export const extractUrls = (text) => {
 
 export const isImageUrl = (u) => /\.(?:png|jpg|jpeg|gif|webp|svg)$/i.test(u);
 export const isYouTubeUrl = (u) => /(?:youtube\.com\/watch\?v=|youtu\.be\/)/i.test(u);
+
+/**
+ * True for a URL that is really one of OUR NAMES pointing at nothing —
+ * `http://Axona.bot`, `https://axona.dev/`. Suppressing the autolink in the
+ * markdown renderer was not enough: a name can still reach here as a real href
+ * when someone pastes text the client already linkified, e.g.
+ * `[Axona.bot](http://Axona.bot)`. That produced a link-preview card for a
+ * host that does not exist (and a favicon fetch for domain=axona.bot).
+ *
+ * A PATH means the author meant a real address — https://axona.net/whitepaper/…
+ * previews normally. Only the bare host is suppressed.
+ */
+export const isAxonaNameUrl = (u) => {
+  try {
+    const { hostname, pathname, search } = new URL(u);
+    if (!/^axona\.[a-z0-9][a-z0-9-]*$/i.test(hostname)) return false;
+    return (pathname === '' || pathname === '/') && !search;
+  } catch { return false; }
+};

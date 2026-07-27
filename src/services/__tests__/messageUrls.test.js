@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractUrls, isImageUrl, isYouTubeUrl } from '../messageUrls.js';
+import { extractUrls, isImageUrl, isYouTubeUrl, isAxonaNameUrl } from '../messageUrls.js';
 
 describe('extractUrls — the unfurl must target the same address as the anchor', () => {
   // Joi's report, #general 2026-07-27, verbatim shape.
@@ -70,5 +70,30 @@ describe('classifiers', () => {
     expect(isYouTubeUrl('https://youtu.be/dQw4w9WgXcQ')).toBe(true);
     expect(isYouTubeUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ')).toBe(true);
     expect(isYouTubeUrl('https://a.com/x')).toBe(false);
+  });
+});
+
+describe('isAxonaNameUrl — a name that reached us as a real href', () => {
+  it('suppresses a pasted [Axona.bot](http://Axona.bot) preview', () => {
+    expect(isAxonaNameUrl('http://Axona.bot')).toBe(true);
+  });
+  it('suppresses bare axona.* hosts with or without trailing slash', () => {
+    expect(isAxonaNameUrl('https://axona.dev')).toBe(true);
+    expect(isAxonaNameUrl('https://axona.chat/')).toBe(true);
+    expect(isAxonaNameUrl('https://axona.net')).toBe(true);
+  });
+  it('KEEPS axona.net with a real path — the whitepaper must still preview', () => {
+    expect(isAxonaNameUrl('https://axona.net/whitepaper/Axona-Whitepaper.pdf')).toBe(false);
+  });
+  it('KEEPS a bare host with a query', () => {
+    expect(isAxonaNameUrl('https://axona.chat/?topic=abc')).toBe(false);
+  });
+  it('leaves other hosts alone', () => {
+    expect(isAxonaNameUrl('https://notes.ito.com/')).toBe(false);
+    expect(isAxonaNameUrl('https://example.bot/')).toBe(false);
+  });
+  it('is safe on junk', () => {
+    expect(isAxonaNameUrl('not a url')).toBe(false);
+    expect(isAxonaNameUrl(null)).toBe(false);
   });
 });
