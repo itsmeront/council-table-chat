@@ -80,6 +80,33 @@ const persistLastRead = (map) => {
   try { localStorage.setItem('axona-last-read', JSON.stringify(map)); } catch { /* */ }
 };
 
+// Last channel the user was reading. Restored on load so a returning session
+// opens where it left off instead of always at #lobby.
+//
+// The stored topic is VALIDATED against the subscribed list rather than
+// trusted. A topic the user has since left would otherwise reopen as a
+// channel that is not in the sidebar — visible, unleaveable, and receiving
+// nothing, because nothing subscribed it. Falling back to the default is the
+// only safe reading of a stale pointer.
+const DEFAULT_TOPIC = { region: 'eagle', name: 'lobby' };
+
+export const loadLastTopic = (subscribed) => {
+  try {
+    const raw = localStorage.getItem('axona-last-topic');
+    if (!raw) return DEFAULT_TOPIC;
+    const saved = JSON.parse(raw);
+    if (!saved || typeof saved !== 'object' || !saved.name) return DEFAULT_TOPIC;
+    const savedId = getTopicId(saved);
+    // Compare by derived id, not by name: owner and write policy fold into the
+    // id, so two topics can share a name and be different channels.
+    return subscribed.some(t => getTopicId(t) === savedId) ? saved : DEFAULT_TOPIC;
+  } catch { return DEFAULT_TOPIC; }
+};
+
+const persistLastTopic = (topic) => {
+  try { localStorage.setItem('axona-last-topic', JSON.stringify(topic)); } catch { /* */ }
+};
+
 // A message counts toward unread if it's not the user's own and was published
 // after the watermark. Envelope ts is publish time, so replayed history older
 // than the watermark stays read. Author-class is provenance, NOT a read gate —
@@ -93,13 +120,19 @@ export const countUnread = (state, topicId) => {
   ).length;
 };
 
-export const useChatStore = create((set, get) => ({
+export const useChatStore = create((set, get) => {
+  // Resolved once, in order: the topic list must exist before the last-open
+  // topic can be validated against it.
+  const initialTopics = loadPersistedTopics();
+  const initialTopic  = loadLastTopic(initialTopics);
+
+  return {
   // Active states
-  activeTopic: { region: 'eagle', name: 'lobby' }, // Default open channel
-  activeTopicId: 'eagle::lobby:open',
+  activeTopic: initialTopic,
+  activeTopicId: getTopicId(initialTopic),
 
   // Channels/Topics list
-  subscribedTopics: loadPersistedTopics(),
+  subscribedTopics: initialTopics,
 
   // Ticker (advertised topics)
   tickerVisible: true,
@@ -162,6 +195,7 @@ export const useChatStore = create((set, get) => ({
     // Topic can be a descriptor
     const id = getTopicId(topic);
     set({ activeTopic: topic, activeTopicId: id });
+    persistLastTopic(topic);
     get().markTopicRead(id);
   },
 
@@ -352,10 +386,15 @@ export const useChatStore = create((set, get) => ({
       };
     });
   }
-}));
+  };
+});
 
 // Dev builds only: expose the store so layout/regression checks can inject
 // synthetic envelopes from the console without a live network.
-if (import.meta.env.DEV) {
+// `typeof window` guard, not just the DEV flag: DEV is also true under vitest,
+// which runs in Node where `window` does not exist — without this the whole
+// module throws on import and any test that touches the store collects zero
+// tests, which reads as "no tests here" rather than "the import failed".
+if (import.meta.env.DEV && typeof window !== 'undefined') {
   window.useChatStore = useChatStore;
 }
