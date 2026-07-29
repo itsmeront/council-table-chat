@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { Markdown } from '@tiptap/markdown';
@@ -7,6 +7,7 @@ import { useChatStore } from '../stores/useChatStore.js';
 import { useHandle } from '../contexts/HandleContext.jsx';
 import AxonaChatClient from '../services/AxonaChatClient.js';
 import CryptoService from '../services/CryptoService.js';
+import { loadHistory, appendHistory, stepHistory, historyAt } from '../services/messageHistory.js';
 
 // Simple toolbar button
 const ToolbarButton = ({ onClick, label, active = false }) => (
@@ -43,6 +44,16 @@ const Composer = ({ replyTarget, privateReplyTarget, clearReplyTargets, onOpenMo
   const [isExpanded, setIsExpanded] = useState(false);
   const [rawMarkdown, setRawMarkdown] = useState('');
   const [isRawView, setIsRawView] = useState(false);
+
+  // ── shell-style recall of what you have sent before ────────────────────────
+  // histIndex counts back from the newest: -1 = "not navigating, this is my live
+  // draft", 0 = newest sent, 1 = the one before it. draftRef holds the draft that
+  // was on screen when navigation STARTED, so pressing Down past the newest puts
+  // the user's own unsent text back — the thing that makes trying Up feel safe.
+  const [history, setHistory] = useState(() => loadHistory());
+  const [histIndex, setHistIndex] = useState(-1);
+  const draftRef = useRef('');
+  const rawRef = useRef(null);
 
   const editor = useEditor({
     extensions: [
@@ -154,6 +165,13 @@ const Composer = ({ replyTarget, privateReplyTarget, clearReplyTargets, onOpenMo
       // Publish using AxonaChatClient
       await AxonaChatClient.publish(activeTopic, textToSend, options);
 
+      // Recall buffer: only AFTER the publish resolves, so a failed send does not
+      // leave a phantom in history. Private replies are excluded inside
+      // appendHistory — their plaintext must not be written to disk.
+      setHistory(appendHistory(plainText, { private: !!privateReplyTarget }));
+      setHistIndex(-1);
+      draftRef.current = '';
+
       editor.commands.setContent('');
       setRawMarkdown('');
       setIsRawView(false);
@@ -163,12 +181,75 @@ const Composer = ({ replyTarget, privateReplyTarget, clearReplyTargets, onOpenMo
     }
   };
 
+  // Put `value` in the editor and remember where we are in the buffer. A null
+  // resolution means "past the newest" → restore the draft we set aside.
+  const applyHistory = (idx) => {
+    const recalled = historyAt(history, idx);
+    const value = recalled === null ? draftRef.current : recalled;
+    if (isRawView) setRawMarkdown(value);
+    else editor?.commands.setContent(value || '', { contentType: 'markdown' });
+    setHistIndex(idx);
+  };
+
+  const navigateHistory = (dir) => {
+    if (!history.length) return false;
+    // First step out of the live draft: stash it so Down can bring it back.
+    if (histIndex === -1) draftRef.current = isRawView ? rawMarkdown : (editor?.getMarkdown() || '');
+    const next = stepHistory(histIndex, dir, history.length);
+    if (next === histIndex) return true;   // already at the oldest: consume, don't wrap
+    applyHistory(next);
+    return true;
+  };
+
+  // Up/Down are LEGITIMATE caret movement in a multi-line markdown editor, so
+  // history recall only takes over at the edge — Up on the FIRST line, Down on
+  // the LAST. That is the shell convention, and it lets a recalled multi-line
+  // message be edited normally: you step further back only once the caret has
+  // reached the top.
+  //
+  // LINE, not position. The first cut compared caret position against the document
+  // start (`from <= 1`), which looked equivalent and was not: after a recall the
+  // caret sits at the end of the restored text, so on single-line content — the
+  // common case, and the only case a terminal has — position was never 1 and Up
+  // silently stopped walking after the first step. Browser-verified. Comparing
+  // COORDINATES is what "at the top" actually means, and it gets soft-wrapped
+  // long lines right too, which a newline count would not.
+  const LINE_EPS = 4;                                   // px slack for line-box rounding
+  const atEdge = (dir) => {
+    if (isRawView) {
+      const el = rawRef.current;
+      if (!el) return true;
+      const v = el.value ?? '';
+      // Logical lines are the honest reading for a monospace raw pane.
+      return dir === 'up' ? v.lastIndexOf('\n', el.selectionStart - 1) === -1
+                          : v.indexOf('\n', el.selectionEnd) === -1;
+    }
+    if (!editor?.view) return false;
+    try {
+      const { state, view } = editor;
+      const here = view.coordsAtPos(state.selection.head);
+      if (dir === 'up') return here.top - view.coordsAtPos(1).top < LINE_EPS;
+      const endPos = Math.max(1, state.doc.content.size - 1);
+      return view.coordsAtPos(endPos).bottom - here.bottom < LINE_EPS;
+    } catch {
+      return false;   // coordsAtPos can throw on a detached view — never hijack the key then
+    }
+  };
+
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       handleSend();
       setIsExpanded(false);
+      return;
     }
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    // Leave modified arrows alone — those are select-to-line, word jumps, and
+    // OS-level shortcuts, none of which should mean "recall a message".
+    if (e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return;
+    const dir = e.key === 'ArrowUp' ? 'up' : 'down';
+    if (!atEdge(dir)) return;                // caret has somewhere to go: let it
+    if (navigateHistory(dir)) e.preventDefault();
   };
 
   // Helper to apply inline marks (Bold, Italic)
@@ -507,6 +588,7 @@ const Composer = ({ replyTarget, privateReplyTarget, clearReplyTargets, onOpenMo
             >
               {isRawView ? (
                 <textarea
+                  ref={rawRef}
                   value={rawMarkdown}
                   onChange={handleRawChange}
                   placeholder="Type raw markdown..."
@@ -545,7 +627,7 @@ const Composer = ({ replyTarget, privateReplyTarget, clearReplyTargets, onOpenMo
                   Sending as {declaration === 'agent' ? '🤖' : '🙋'} <b style={{ color: 'var(--color-text)' }}>{activeHandle?.name || '(no persona)'}</b>
                 </span>
                 <span style={{ fontSize: '0.72rem', color: 'var(--color-muted)' }}>
-                  Tip: Press <b>Ctrl + Enter</b> to send | Max size: 15 KB
+                  Tip: <b>Ctrl + Enter</b> to send | <b>↑ / ↓</b> recalls messages you sent | Max size: 15 KB
                 </span>
               </div>
               <div style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}>
