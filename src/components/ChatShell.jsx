@@ -9,6 +9,7 @@ import { usePeer } from '../contexts/PeerContext.jsx';
 import { useHandle } from '../contexts/HandleContext.jsx';
 import { useChatStore, getTopicId, countUnread } from '../stores/useChatStore.js';
 import AxonaChatClient from '../services/AxonaChatClient.js';
+import { useCompactLayout } from '../hooks/useCompactLayout.js';
 
 const ChatShell = () => {
   const { peer } = usePeer();
@@ -22,8 +23,10 @@ const ChatShell = () => {
   // load (picking a topic is the first decision), slides aside when a topic is
   // selected, and a floating "☰ Topics" pill brings it back. Desktop keeps the
   // fixed two-column layout.
-  const [isMobile, setIsMobile] = useState(window.innerWidth <= 800);
-  const [drawerOpen, setDrawerOpen] = useState(window.innerWidth <= 800);
+  // Compact = phone-shaped in EITHER dimension, so a landscape phone (wide but
+  // ~400px tall) gets the drawer layout instead of the two-column desktop one.
+  const isMobile = useCompactLayout();
+  const [drawerOpen, setDrawerOpen] = useState(isMobile);
 
   // Selecting a topic (rail click, ticker join, deep link) closes the drawer —
   // but only on a real CHANGE, never on mount, so the first-load drawer stays
@@ -65,15 +68,6 @@ const ChatShell = () => {
       AxonaChatClient.declareAuthorClass().catch(() => {});
     }
   }, [peer, activeHandle, declaration]);
-
-  // Handle window resizing
-  useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(window.innerWidth <= 800);
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
 
   // Parse private invite queries from URL on load
   useEffect(() => {

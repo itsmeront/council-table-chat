@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { useChatStore } from '../stores/useChatStore.js';
+import { useCompactLayout } from '../hooks/useCompactLayout.js';
 import Message from './Message.jsx';
 import AxonaChatClient from '../services/AxonaChatClient.js';
 import { usePeer } from '../contexts/PeerContext.jsx';
@@ -23,14 +24,14 @@ const MessagePane = ({ onOpenModal, setReplyTarget, setPrivateReplyTarget }) => 
   // so compare against the active topic's hex id (same derivation the network
   // uses — immune to region-name spelling like eagle vs its canonical name).
   // Retracting/expiring the ad removes it from the store → button re-enables.
-  // Mobile: the floating "☰ Topics" pill sits over the header's top-left, so
-  // indent the header content past it (same 800px threshold as ChatShell).
-  const [isMobile, setIsMobile] = useState(window.innerWidth <= 800);
-  useEffect(() => {
-    const onResize = () => setIsMobile(window.innerWidth <= 800);
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
+  // Compact: the floating "☰ Topics" pill sits over the header's top-left, so
+  // indent the header content past it. MUST use the same predicate as the
+  // component that RENDERS the pill (ChatShell) — this was a third independent
+  // copy of `innerWidth <= 800`, and the moment ChatShell became height-aware
+  // they disagreed: a landscape phone (812x375) is compact by height, so
+  // ChatShell drew the pill while this file still thought "desktop" and skipped
+  // the indent, parking the pill squarely on top of the channel name.
+  const isMobile = useCompactLayout();
 
   const [copied, setCopied] = useState(false);
   const [activeHexId, setActiveHexId] = useState(null);

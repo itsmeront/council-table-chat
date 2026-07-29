@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { KERNEL_VERSION } from '@axona/protocol';
 import { useChatStore } from '../stores/useChatStore.js';
 import { useHandle } from '../contexts/HandleContext.jsx';
 import { usePeer } from '../contexts/PeerContext.jsx';
 import { useNetwork } from '../contexts/NetworkContext.jsx';
+import { useCompactLayout } from '../hooks/useCompactLayout.js';
 
 // Injected by Vite from package.json at build time.
 const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev';
@@ -12,40 +13,28 @@ const StatusFooter = ({ onOpenModal }) => {
   const { handles, activeHandle, setActiveHandleId, declaration, setDeclaration } = useHandle();
   const { status } = usePeer();
   const { bridgeUrl } = useNetwork();
-  const { theme, toggleTheme, presence } = useChatStore();
+  const { theme, toggleTheme } = useChatStore();
   const [showHandlesList, setShowHandlesList] = useState(false);
-  const [showParticipantsList, setShowParticipantsList] = useState(false);
 
-  // Phone-width footer: drop the informational text (bridge host, version
-  // string, member breakdown words) so the interactive controls fit on one
-  // row. Same 800px threshold as ChatShell's tab layout.
-  const [isMobile, setIsMobile] = useState(window.innerWidth <= 800);
-  useEffect(() => {
-    const onResize = () => setIsMobile(window.innerWidth <= 800);
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
+  // Compact footer: drop the informational text (connection words, bridge host,
+  // version string) so the interactive controls fit on one row. Shared with
+  // ChatShell so the two cannot disagree, and height-aware so a landscape phone
+  // counts as compact too.
+  const isMobile = useCompactLayout();
 
   const toggleDeclaration = () => {
     setDeclaration(declaration === 'human' ? 'agent' : 'human');
   };
 
-  // Filter peers active in the last 90 seconds
-  const now = Date.now();
-  const activePeers = Object.entries(presence)
-    .map(([id, info]) => ({ id, ...info }))
-    .filter(p => now - p.lastSeen < 90000);
-
-  const humans = activePeers.filter(p => p.declaration === 'human');
-  const agents = activePeers.filter(p => p.declaration === 'agent');
-
   return (
     <div style={{
       display: 'flex',
       alignItems: 'center',
-      justifyContent: 'space-between',
-      height: '42px',
-      padding: '0 1rem',
+      justifyContent: 'flex-start',
+      flexWrap: 'wrap',
+      rowGap: '0.3rem',
+      minHeight: '42px',
+      padding: '0.25rem 1rem',
       background: 'var(--color-surface)',
       borderTop: '1px solid var(--border-color)',
       fontSize: '0.78rem',
@@ -77,12 +66,20 @@ const StatusFooter = ({ onOpenModal }) => {
               ({bridgeUrl.replace('wss://', '').replace('https://', '')})
             </span>
           )}
-          <span
-            title="Application version · Axona protocol kernel version"
-            style={{ color: 'var(--color-muted)', fontSize: '0.68rem', fontFamily: 'monospace', whiteSpace: 'nowrap' }}
-          >
-            v{APP_VERSION} · kernel {KERNEL_VERSION}
-          </span>
+          {/* The comment above this block has claimed since it was written that
+              the version string is dropped on phones. It never was — this span
+              rendered unconditionally, and with whiteSpace:nowrap it is the
+              widest thing in the row, which is what pushed the persona,
+              human/agent and QR controls into a heap in the corner. Gated now.
+              The version is still one tap away in the About/share modal. */}
+          {!isMobile && (
+            <span
+              title="Application version · Axona protocol kernel version"
+              style={{ color: 'var(--color-muted)', fontSize: '0.68rem', fontFamily: 'monospace', whiteSpace: 'nowrap' }}
+            >
+              v{APP_VERSION} · kernel {KERNEL_VERSION}
+            </span>
+          )}
         </div>
 
         {!isMobile && <span style={{ color: 'var(--border-color)', opacity: 0.5 }}>|</span>}
@@ -218,77 +215,19 @@ const StatusFooter = ({ onOpenModal }) => {
         </button>
       </div>
 
-      {/* Right side: Active participants classification summary */}
-      <div style={{ position: 'relative' }}>
-        <span
-          onClick={() => setShowParticipantsList(!showParticipantsList)}
-          title="Who's here right now, by their declared class — click for the list"
-          style={{
-            color: 'var(--color-muted)',
-            cursor: 'pointer',
-            fontWeight: '500',
-            userSelect: 'none'
-          }}
-        >
-          {isMobile
-            ? `👥 ${humans.length}·${agents.length}`
-            : `👥 Members: ${humans.length} Humans | ${agents.length} Agents`}
-        </span>
-
-        {showParticipantsList && (
-          <div className="glass" style={{
-            position: 'absolute',
-            bottom: '100%',
-            right: 0,
-            zIndex: 30,
-            background: 'var(--color-surface)',
-            border: '1px solid var(--border-color)',
-            borderRadius: 'var(--radius)',
-            padding: '0.8rem',
-            marginBottom: '6px',
-            minWidth: '200px',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
-            maxHeight: '220px',
-            overflowY: 'auto',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '0.6rem',
-            color: 'var(--color-text)'
-          }}>
-            <div>
-              <div style={{ fontSize: '0.68rem', fontWeight: 'bold', color: '#3498db', textTransform: 'uppercase', marginBottom: '0.2rem' }}>
-                Humans ({humans.length})
-              </div>
-              {humans.length === 0 ? (
-                <div style={{ fontStyle: 'italic', fontSize: '0.7rem', color: 'var(--color-muted)' }}>None active</div>
-              ) : (
-                humans.map(h => (
-                  <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem' }}>
-                    <span style={{ fontWeight: '500' }}>{h.handle}</span>
-                    <span style={{ fontSize: '0.6rem', color: 'var(--color-muted)' }}>{h.id.slice(0, 8)}</span>
-                  </div>
-                ))
-              )}
-            </div>
-
-            <div>
-              <div style={{ fontSize: '0.68rem', fontWeight: 'bold', color: '#9b59b6', textTransform: 'uppercase', marginBottom: '0.2rem' }}>
-                Agents ({agents.length})
-              </div>
-              {agents.length === 0 ? (
-                <div style={{ fontStyle: 'italic', fontSize: '0.7rem', color: 'var(--color-muted)' }}>None active</div>
-              ) : (
-                agents.map(a => (
-                  <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem' }}>
-                    <span style={{ fontWeight: '500', color: '#9b59b6' }}>{a.handle}</span>
-                    <span style={{ fontSize: '0.6rem', color: 'var(--color-muted)' }}>{a.id.slice(0, 8)}</span>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+      {/* The "Members: N Humans | M Agents" readout was REMOVED in 0.43.0.
+          It did not mean what its label said. presence is fed by a single
+          network-wide heartbeat topic (axona-presence-heartbeats, region
+          eagle — AxonaChatClient.js:23), not by the channel you are looking
+          at, so it counted everyone anywhere on Axona who had published a
+          heartbeat, under a label that reads like channel membership. Worse,
+          the 90-second freshness window was evaluated against a Date.now()
+          captured at render time with nothing re-rendering on a timer, so a
+          peer going quiet never aged out of the count — it only ever moved
+          when some unrelated state change happened to re-render this footer.
+          A number that is both mislabelled and frozen is worse than no
+          number. Presence data itself is untouched and still drives the
+          per-message live/ghost indicators. */}
     </div>
   );
 };
