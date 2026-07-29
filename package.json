@@ -1,19 +1,20 @@
 {
   "name": "axona-chat",
   "private": true,
-  "version": "0.39.0",
+  "version": "0.40.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "vitest",
+    "test": "vitest run",
     "check:kernel-pin": "node check_kernel_pin.mjs",
-    "prebuild": "node check_kernel_pin.mjs"
+    "prebuild": "node check_kernel_pin.mjs",
+    "test:watch": "vitest"
   },
   "dependencies": {
-    "@axona/protocol": "github:axona-net/axona-protocol#v4.48.0",
+    "@axona/protocol": "github:axona-net/axona-protocol#v4.49.0",
     "@tiptap/markdown": "^3.28.0",
     "@tiptap/react": "^3.28.0",
     "@tiptap/starter-kit": "^3.28.0",

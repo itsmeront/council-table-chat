@@ -73,6 +73,16 @@ export default defineConfig(() => ({
     // don't fight over one hardcoded port; vite's default otherwise.
     ...(process.env.PORT ? { port: Number(process.env.PORT), strictPort: true } : {})
   },
+  test: {
+    // Vitest walks the whole tree, and `.claude/worktrees/` holds live git
+    // worktrees from parallel agent sessions — each a full checkout with its
+    // own copy of every test. Without this exclude the suite silently runs
+    // STALE code from those trees alongside the real one: the pass count
+    // inflates, and a test can go green against a checkout nobody is editing.
+    // Observed 2026-07-29 — 87 "passing" tests included duplicates of
+    // CryptoService and composerLimits from two abandoned worktrees.
+    exclude: ['**/node_modules/**', '**/dist/**', '.claude/**']
+  },
   resolve: {
     alias: {
       'node-datachannel/polyfill': path.resolve('./src/stubs/node-datachannel-stub.js'),
