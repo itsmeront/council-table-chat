@@ -75,20 +75,18 @@ const ChannelList = ({ onOpenModal }) => {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem', overflowY: 'auto', flex: 1 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '0.25rem', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
           <span style={{ fontSize: '0.75rem', fontWeight: 'bold', letterSpacing: '0.5px', color: 'var(--color-muted)' }}>TOPICS</span>
+          {/* ONE button, because "Join" and "+ New" were one operation. Axona has
+              no topic registry: a descriptor hashes to an address, subscribing IS
+              joining, and nothing records who arrived first — so "+ New" on an
+              open name produced the very same topicId as "Join" on that name.
+              The real choice is the write policy, which is inside. */}
           <div style={{ display: 'flex', gap: '0.4rem' }}>
-            <button 
-              onClick={() => onOpenModal('join')} 
-              style={{ padding: '2px 6px', fontSize: '0.7rem', background: 'rgba(255,255,255,0.03)' }}
-              title="Join a topic by typing its name, or paste a topic link someone shared with you"
-            >
-              Join
-            </button>
-            <button 
-              onClick={() => onOpenModal('create')} 
+            <button
+              onClick={() => onOpenModal('addTopic')}
               style={{ padding: '2px 6px', fontSize: '0.7rem', background: 'var(--color-primary-dark)', color: '#fff' }}
-              title="Start a new topic — open (anyone can post) or moderated (you approve posts before they appear)"
+              title="Add a topic — type a name to open or start one, or paste a link or descriptor someone shared"
             >
-              + New
+              + Add topic
             </button>
           </div>
         </div>

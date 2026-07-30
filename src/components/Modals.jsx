@@ -4,6 +4,7 @@ import QRCode from 'qrcode';
 import { useChatStore } from '../stores/useChatStore.js';
 import { useHandle } from '../contexts/HandleContext.jsx';
 import AxonaChatClient from '../services/AxonaChatClient.js';
+import { resolveTopicInput, describeDescriptor, POLICY_OPTIONS } from '../services/topicInput.js';
 import CryptoService from '../services/CryptoService.js';
 import { looksLikeBrowserName } from '../services/handleHints.js';
 import IdentityBackupPanel from './IdentityBackupPanel.jsx';
@@ -23,12 +24,11 @@ const Modals = ({ activeModal, onClose }) => {
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   // Create channel inputs
-  const [chanName, setChanName] = useState('');
+  const [topicInputRaw, setTopicInputRaw] = useState('');   // name | link | descriptor
   const [chanDesc, setChanDesc] = useState('');
   const [chanMode, setChanMode] = useState('open'); // 'open' | 'controlled' | 'moderated'
 
   // Join inputs
-  const [joinDescriptor, setJoinDescriptor] = useState('');
 
   // Handle inputs
   const [handleName, setHandleName] = useState('');
@@ -70,60 +70,32 @@ const Modals = ({ activeModal, onClose }) => {
 
   if (!activeModal) return null;
 
-  const handleCreateChannel = async (e) => {
+  // ONE handler. Both old ones ended in the same three lines — the difference
+  // was only descriptor construction, which now lives in resolveTopicInput so it
+  // can be tested without a DOM and so the resolved address can be SHOWN.
+  const resolved = resolveTopicInput(topicInputRaw, {
+    policy: chanMode,
+    ownerAuthorId: currentHandle?.authorId ?? null,
+    description: chanDesc,
+  });
+
+  const handleAddTopic = async (e) => {
     e.preventDefault();
-    if (!chanName.trim()) return;
+    if (!resolved.descriptor) { setError(resolved.error || 'Enter a topic.'); return; }
     setIsLoading(true);
-
+    setError('');
     try {
-      const descriptor = {
-        region: 'eagle',
-        name: chanName.trim(),
-        description: chanDesc.trim(),
-        mode: chanMode,
-        owner: chanMode !== 'open' && currentHandle ? currentHandle.authorId : null,
-        write: chanMode === 'open' ? 'open' : 'owner'
-      };
-
-      addTopic(descriptor);
-      setActiveTopic(descriptor);
+      addTopic(resolved.descriptor);
+      setActiveTopic(resolved.descriptor);
       AxonaChatClient.reconcileSubscriptions();
       onClose();
-      // Reset inputs
-      setChanName('');
+      setTopicInputRaw('');
       setChanDesc('');
       setChanMode('open');
     } catch (err) {
       setError(err.message);
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  const handleJoinChannel = (e) => {
-    e.preventDefault();
-    try {
-      let descriptor = null;
-      // Check if it's JSON
-      if (joinDescriptor.trim().startsWith('{')) {
-        descriptor = JSON.parse(joinDescriptor.trim());
-      } else {
-        // Fallback simple link parse / name parse
-        descriptor = {
-          region: 'eagle',
-          name: joinDescriptor.trim(),
-          mode: 'open',
-          write: 'open'
-        };
-      }
-
-      addTopic(descriptor);
-      setActiveTopic(descriptor);
-      AxonaChatClient.reconcileSubscriptions();
-      onClose();
-      setJoinDescriptor('');
-    } catch {
-      setError('Invalid topic descriptor format.');
     }
   };
 
@@ -229,73 +201,90 @@ const Modals = ({ activeModal, onClose }) => {
         </button>
 
         {/* 1. Create Channel Modal */}
-        {activeModal === 'create' && (
+        {/* 1+2. Add Topic — replaces the old separate Create and Join dialogs.
+            They ran the same three lines and differed only in how they built the
+            descriptor; see src/services/topicInput.js for why that split was
+            fictional (no registry) and actively harmful (owner+write fold into
+            the address, so joining a moderated channel BY NAME silently landed
+            you on a different, empty topic — the #393 failure mode). */}
+        {activeModal === 'addTopic' && (
           <div>
-            <h3 style={{ fontFamily: 'Outfit, sans-serif', marginBottom: '1rem' }}>Create Topic</h3>
-            <form onSubmit={handleCreateChannel} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <h3 style={{ fontFamily: 'Outfit, sans-serif', marginBottom: '0.35rem' }}>Add Topic</h3>
+            <p style={{ fontSize: '0.75rem', color: 'var(--color-muted)', marginTop: 0, marginBottom: '1rem' }}>
+              Type a name to open a topic (or start it, if nobody has yet), or paste a link or
+              descriptor someone shared.
+            </p>
+            <form onSubmit={handleAddTopic} style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
               <div>
                 <label style={{ fontSize: '0.8rem', color: 'var(--color-muted)', display: 'block', marginBottom: '0.25rem' }}>
-                  Topic Name <span style={{ fontWeight: 'normal' }}>(no spaces — so links like axona.chat?topic=name work; dashes are substituted)</span>
+                  Name, link, or descriptor
                 </label>
-                <input
-                  type="text"
-                  placeholder="e.g. retro-gaming"
-                  value={chanName}
-                  onChange={(e) => setChanName(e.target.value.replace(/\s+/g, '-'))}
-                  style={inputStyle}
-                  required
-                />
-              </div>
-
-              <div>
-                <label style={{ fontSize: '0.8rem', color: 'var(--color-muted)', display: 'block', marginBottom: '0.25rem' }}>Description</label>
-                <input
-                  type="text"
-                  placeholder="Short summary of this topic"
-                  value={chanDesc}
-                  onChange={(e) => setChanDesc(e.target.value)}
-                  style={inputStyle}
-                />
-              </div>
-
-              <div>
-                <label style={{ fontSize: '0.8rem', color: 'var(--color-muted)', display: 'block', marginBottom: '0.25rem' }}>Mode</label>
-                <select 
-                  value={chanMode} 
-                  onChange={(e) => setChanMode(e.target.value)}
-                  style={selectStyle}
-                >
-                  <option value="open">Open (Anyone can post directly)</option>
-                  <option value="controlled">Controlled (Only whitelisted can post)</option>
-                  <option value="moderated">Moderated (Submissions reviewed by owner)</option>
-                </select>
-              </div>
-
-              <button type="submit" disabled={isLoading} style={btnStyle}>
-                {isLoading ? 'Creating...' : 'Create Topic'}
-              </button>
-            </form>
-          </div>
-        )}
-
-        {/* 2. Join Channel Modal */}
-        {activeModal === 'join' && (
-          <div>
-            <h3 style={{ fontFamily: 'Outfit, sans-serif', marginBottom: '1rem' }}>Join Topic</h3>
-            <form onSubmit={handleJoinChannel} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div>
-                <label style={{ fontSize: '0.8rem', color: 'var(--color-muted)', display: 'block', marginBottom: '0.25rem' }}>Topic Descriptor (JSON or name)</label>
                 <textarea
-                  placeholder='Paste topic descriptor JSON or simply enter a channel name'
-                  value={joinDescriptor}
-                  onChange={(e) => setJoinDescriptor(e.target.value)}
-                  rows={4}
+                  placeholder={'retro-gaming\n\n…or https://axona.chat#topic=…\n…or {"region":"eagle","name":"…"}'}
+                  value={topicInputRaw}
+                  onChange={(e) => setTopicInputRaw(e.target.value)}
+                  rows={3}
                   style={{ ...inputStyle, fontFamily: 'monospace', fontSize: '0.75rem', resize: 'none' }}
                   required
                 />
               </div>
+
+              {/* The policy control only means anything for a bare NAME. A pasted
+                  link or descriptor carries its own, and silently ignoring the
+                  control would be the mis-addressing bug all over again — so say so. */}
+              {resolved.policyApplies ? (
+                <>
+                  <div>
+                    <label style={{ fontSize: '0.8rem', color: 'var(--color-muted)', display: 'block', marginBottom: '0.25rem' }}>
+                      Who can post
+                    </label>
+                    <select value={chanMode} onChange={(e) => setChanMode(e.target.value)} style={selectStyle}>
+                      {POLICY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                    <div style={{ fontSize: '0.68rem', color: 'var(--color-muted)', marginTop: '0.3rem' }}>
+                      This is part of the topic's address — the same name with a different
+                      policy is a different topic.
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.8rem', color: 'var(--color-muted)', display: 'block', marginBottom: '0.25rem' }}>
+                      Description <span style={{ fontWeight: 'normal' }}>(optional, only on your device)</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Short summary of this topic"
+                      value={chanDesc}
+                      onChange={(e) => setChanDesc(e.target.value)}
+                      style={inputStyle}
+                    />
+                  </div>
+                </>
+              ) : (
+                <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)' }}>
+                  This {resolved.source === 'link' ? 'link' : 'descriptor'} sets its own posting
+                  policy, so there is nothing to choose.
+                </div>
+              )}
+
+              {/* Show the ADDRESS before committing to it. */}
+              {resolved.descriptor && (
+                <div style={{
+                  fontSize: '0.72rem', fontFamily: 'monospace', color: 'var(--color-text)',
+                  background: 'var(--color-bg)', border: '1px solid var(--border-color)',
+                  borderRadius: '4px', padding: '0.45rem 0.6rem', wordBreak: 'break-all'
+                }}>
+                  {describeDescriptor(resolved.descriptor)}
+                </div>
+              )}
+
+              {(resolved.error && topicInputRaw.trim()) && (
+                <div style={{ color: '#ff6b6b', fontSize: '0.8rem' }}>{resolved.error}</div>
+              )}
               {error && <div style={{ color: '#ff6b6b', fontSize: '0.8rem' }}>{error}</div>}
-              <button type="submit" style={btnStyle}>Join Topic</button>
+
+              <button type="submit" disabled={isLoading || !resolved.descriptor} style={btnStyle}>
+                {isLoading ? 'Adding…' : 'Add topic'}
+              </button>
             </form>
           </div>
         )}
