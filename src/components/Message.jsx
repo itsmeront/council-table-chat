@@ -25,6 +25,13 @@ const Message = ({ envelope, activeTopic, onReply, onPrivateReply, level = 0 }) 
   // VERIFIED author-class from the kernel's signed attestation (getAuthorClass),
   // keyed by the authenticated signerPubkey — NOT the spoofable in-body string.
   const resolvedClass = useChatStore(s => s.authorClasses[signerPubkey]?.class);
+  // Honest send state: a publish is pending until its envelope echoes back
+  // while the session has peers. An echo on a zero-peer island proves nothing
+  // — the local node roots the topic itself and delivers to itself. Rendering
+  // such a message as plainly "sent" cost a real question its answer
+  // (2026-08-05): it sat on a slept session's island for hours, delivered to
+  // no one, looking exactly like every message that made it.
+  const pendingSend = useChatStore(s => s.pendingSends[msgId]);
   const [showConfirm, setShowConfirm] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -278,8 +285,24 @@ const Message = ({ envelope, activeTopic, onReply, onPrivateReply, level = 0 }) 
           </span>
         </div>
 
-        <span style={{ fontSize: '0.7rem', color: 'var(--color-muted)', whiteSpace: 'nowrap' }} title={fullTimestamp}>
-          {formattedTime}
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', whiteSpace: 'nowrap' }}>
+          {isOwn && pendingSend && (
+            <span
+              title={pendingSend.island
+                ? 'Sent while disconnected — no other node has received this yet. It will be re-sent automatically when the connection recovers.'
+                : 'Awaiting delivery confirmation from the network.'}
+              style={{
+                fontSize: '0.6rem', fontWeight: 600, padding: '1px 6px', borderRadius: '10px',
+                background: pendingSend.island ? 'rgba(231, 76, 60, 0.15)' : 'rgba(241, 196, 15, 0.15)',
+                color: pendingSend.island ? '#e74c3c' : '#b7950b'
+              }}
+            >
+              {pendingSend.island ? '⚠ NOT DELIVERED' : 'SENDING…'}
+            </span>
+          )}
+          <span style={{ fontSize: '0.7rem', color: 'var(--color-muted)' }} title={fullTimestamp}>
+            {formattedTime}
+          </span>
         </span>
       </div>
 

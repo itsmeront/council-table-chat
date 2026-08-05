@@ -5,6 +5,25 @@ import AxonaChatClient from '../services/AxonaChatClient.js';
 
 const PeerContext = createContext();
 
+// ── Recovery watchdog constants ──────────────────────────────────────────────
+// Captured live 2026-08-05: an overnight-slept session woke at "Seeking Peers"
+// and stayed there for ten hours — deaf inbound, and a publish sent from it
+// self-rooted on a one-node island and never reached the network. The status
+// interval was already measuring the failure every 5 seconds; it just never
+// ACTED. These constants turn the measurement into reflexes.
+const TICK_MS = 5000;
+// A tick gap this much longer than the interval means the machine slept or the
+// tab was suspended — timers don't drift 30s on a live page.
+const SLEEP_GAP_MS = 30_000;
+// Zero peers for this long while online = wedged, whatever the cause. The
+// kernel's own reconnect (1s→16s backoff) gets ample time to win first; this
+// fires only when every lower layer has failed to.
+const RECOVER_AFTER_MS = 25_000;
+// Backoff between recovery ATTEMPTS, so a genuinely-down network doesn't
+// hot-loop full reconnects.
+const RETRY_INITIAL_MS = 10_000;
+const RETRY_MAX_MS = 60_000;
+
 export const PeerProvider = ({ children }) => {
   const { bridgeUrl } = useNetwork();
   const [peer, setPeer] = useState(null);
@@ -16,6 +35,15 @@ export const PeerProvider = ({ children }) => {
     let active = true;
     let cleanup = null;
     let interval = null;
+    // Watchdog state — plain locals, not React state: the tick reads and
+    // writes them every 5s and nothing renders from them.
+    let lastTickAt = Date.now();
+    let zeroSince = null;        // when peers first read 0 (null = not zero)
+    let everConnected = false;   // don't "recover" a session still bootstrapping
+    let recovering = false;
+    let retryDelayMs = RETRY_INITIAL_MS;
+    let nextRetryAt = 0;
+    let currentPeer = null;      // the live peer the tick health-checks
 
     // First run only: wait for onboarding to finish so the connection can
     // use the location the user just granted (or explicitly skipped).
@@ -101,18 +129,10 @@ export const PeerProvider = ({ children }) => {
           if (result.disconnect) result.disconnect();
         };
 
-        // Monitor peer synaptome size for status updates
-        interval = setInterval(() => {
-          if (result.peer) {
-            const peersCount = result.peer.peers ? result.peer.peers().length : 0;
-            setStatus(prev => ({
-              ...prev,
-              ready: peersCount > 0,
-              peers: peersCount,
-              reason: peersCount > 0 ? 'connected' : 'seeking-peers'
-            }));
-          }
-        }, 5000);
+        // Fresh connection: reset the watchdog's memory of the old one.
+        everConnected = false;
+        zeroSince = null;
+        currentPeer = result.peer;
 
       } catch (err) {
         console.error('Peer connection failed:', err);
@@ -122,11 +142,84 @@ export const PeerProvider = ({ children }) => {
       }
     };
 
+    // ── Recovery: tear the whole session down and rebuild it ────────────────
+    // Deliberately a FULL rebuild, not a nudge to whichever layer looks stuck.
+    // The wedge has at least three distinct causes (socket reconnect loop died,
+    // socket back but mesh never rebuilt, graduated client whose re-dial
+    // watchdog failed) and the app cannot tell them apart from out here — but a
+    // rebuild recovers all of them. setPeer() → reconcileSubscriptions()
+    // re-seats every topic, and replayPendingSends() re-publishes anything the
+    // dead session stranded on its island (idempotent: same payload bytes →
+    // same content-addressed msgId).
+    const recover = async (why) => {
+      if (recovering || !active) return;
+      const now = Date.now();
+      if (now < nextRetryAt) return;
+      recovering = true;
+      nextRetryAt = now + retryDelayMs;
+      retryDelayMs = Math.min(retryDelayMs * 2, RETRY_MAX_MS);
+      console.warn(`[axona-chat] session recovery: ${why} — rebuilding connection`);
+      setStatus(prev => ({ ...prev, ready: false, reason: 'recovering' }));
+      try {
+        if (cleanup) { try { cleanup(); } catch { /* old session may be half-dead */ } }
+        cleanup = null;
+        currentPeer = null;
+        await init();                      // rebuilds peer + setPeer → re-seats subs
+        if (currentPeer) {
+          retryDelayMs = RETRY_INITIAL_MS; // a successful rebuild re-arms fast retry
+          AxonaChatClient.replayPendingSends();
+        }
+      } finally {
+        recovering = false;
+      }
+    };
+
+    // ── The tick: measure AND act ───────────────────────────────────────────
+    // This interval used to only repaint the footer label. It now also detects
+    // sleep (a tick gap no live page produces) and persistent zero-peers, and
+    // triggers recovery — because a status line that watches the session die
+    // and reports it politely is not a health system (I-6's lesson, app-side).
+    const tick = () => {
+      const now = Date.now();
+      const gap = now - lastTickAt;
+      lastTickAt = now;
+      if (!currentPeer || recovering) return;
+
+      const peersCount = currentPeer.peers ? currentPeer.peers().length : 0;
+      setStatus(prev => ({
+        ...prev,
+        ready: peersCount > 0,
+        peers: peersCount,
+        reason: peersCount > 0 ? 'connected' : 'seeking-peers'
+      }));
+
+      if (peersCount > 0) { everConnected = true; zeroSince = null; return; }
+      if (!everConnected) return;          // still bootstrapping — init owns it
+      if (zeroSince === null) zeroSince = now;
+
+      // Sleep detected AND we woke up deaf: don't wait out the threshold —
+      // the kernel's backoff timers slept too, and the user is looking at
+      // the screen right now.
+      if (gap > SLEEP_GAP_MS) { recover(`wake after ~${Math.round(gap / 1000)}s suspend with 0 peers`); return; }
+      if (navigator.onLine !== false && now - zeroSince > RECOVER_AFTER_MS) {
+        recover(`0 peers for ${Math.round((now - zeroSince) / 1000)}s`);
+      }
+    };
+    interval = setInterval(tick, TICK_MS);
+
+    // Coming back to a hidden tab or a returning network is the moment the
+    // wedge becomes user-visible — check immediately instead of within 5s.
+    const onVisible = () => { if (document.visibilityState === 'visible') tick(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('online', onVisible);
+
     init();
 
     return () => {
       active = false;
       if (interval) clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', onVisible);
       if (cleanup) cleanup();
     };
   }, [bridgeUrl]); // Reconnect ONLY on bridge change — never on handle switch

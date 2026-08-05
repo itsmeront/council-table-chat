@@ -58,7 +58,9 @@ const StatusFooter = ({ onOpenModal }) => {
           }} />
           {!isMobile && (
             <span style={{ color: 'var(--color-text)', fontWeight: '500' }}>
-              {status.reason === 'connecting' ? 'Connecting...' : status.ready ? 'Online' : 'Seeking Peers'}
+              {status.reason === 'connecting' ? 'Connecting...'
+                : status.reason === 'recovering' ? 'Reconnecting…'
+                : status.ready ? 'Online' : 'Seeking Peers'}
             </span>
           )}
           {!isMobile && (

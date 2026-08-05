@@ -170,6 +170,15 @@ class AxonaChatClient {
       const isPresence = descriptor.name === this.heartbeatTopic.name;
 
       const sub = await this.peer.sub(descriptor, (envelope) => {
+        // Send confirmation: our own envelope arriving counts as delivered
+        // ONLY while the session has peers. On a zero-peer island the local
+        // node roots the topic itself and echoes the publish straight back —
+        // an echo that proves nothing about the network (see pendingSends in
+        // the store). With peers, the echo passed through a real root.
+        if (useChatStore.getState().pendingSends[envelope.msgId]) {
+          const meshPeers = this.peer?.peers ? this.peer.peers().length : 0;
+          if (meshPeers > 0) useChatStore.getState().confirmSend(envelope.msgId);
+        }
         if (envelope.deleted) {
           // A retracted ad must disappear from DISCOVER live on every
           // client, not linger until the ticker's hold time expires.
@@ -423,7 +432,41 @@ class AxonaChatClient {
 
     // Publish on the protocol peer
     const msgId = await this.peer.pub(targetDescriptor, payload, { signWith: activeAuthor });
+
+    // Record as pending until the envelope echoes back with peers>0. Store the
+    // EXACT payload object and the signing handle's authorRef: a replay must
+    // re-publish the same bytes under the same author, or it mints a different
+    // msgId and stops being idempotent.
+    const meshPeers = this.peer?.peers ? this.peer.peers().length : 0;
+    useChatStore.getState().markPendingSend(msgId, {
+      topicId: getTopicId(targetDescriptor),
+      descriptor: targetDescriptor,
+      payload,
+      authorRef: handle.authorRef,
+      at: Date.now(),
+      island: meshPeers === 0
+    });
     return msgId;
+  }
+
+  // Re-publish every unconfirmed send on the (fresh) peer. Called after a
+  // session recovery: anything published while the old session sat on a
+  // zero-peer island exists nowhere but the dead node's memory. Safe to call
+  // repeatedly — payloads carry no timestamps, so the content-addressed msgId
+  // is identical on every attempt; a message that DID land is deduped at the
+  // root and simply confirms on its echo.
+  async replayPendingSends() {
+    if (!this.peer) return;
+    const pending = useChatStore.getState().pendingSends;
+    for (const [msgId, rec] of Object.entries(pending)) {
+      try {
+        const author = await createAuthorIdentity({ persistAs: rec.authorRef });
+        await this.peer.pub(rec.descriptor, rec.payload, { signWith: author });
+        console.info(`[axona-chat] replayed pending send ${msgId.slice(0, 10)}…`);
+      } catch (err) {
+        console.warn(`[axona-chat] replay failed for ${msgId.slice(0, 10)}…: ${err.message}`);
+      }
+    }
   }
 
   async publishPrivateContinuation(partnerId, text) {

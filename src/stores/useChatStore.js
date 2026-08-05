@@ -296,6 +296,32 @@ export const useChatStore = create((set, get) => {
     });
   },
 
+  // ── Honest send state ──────────────────────────────────────────────────────
+  // pendingSends[msgId] = { topicId, descriptor, payload, at, island }.
+  // A publish is PENDING until its own envelope comes back through the
+  // subscription WHILE the session has peers. The peers>0 condition is the
+  // whole point: a publish from a zero-peer session terminates at SELF, the
+  // local node roots its own one-node island and dutifully echoes the message
+  // back — so the echo alone proves nothing (captured live 2026-08-05: a
+  // message rendered as sent that no other node ever received). The stored
+  // payload is the EXACT object that was published, so a replay after
+  // recovery re-derives the same content-addressed msgId — retry is
+  // idempotent by construction.
+  pendingSends: {},
+
+  markPendingSend: (msgId, record) => {
+    set(state => ({ pendingSends: { ...state.pendingSends, [msgId]: record } }));
+  },
+
+  confirmSend: (msgId) => {
+    set(state => {
+      if (!state.pendingSends[msgId]) return {};
+      const next = { ...state.pendingSends };
+      delete next[msgId];
+      return { pendingSends: next };
+    });
+  },
+
   killMessage: (topicId, msgId) => {
     set(state => {
       const topicMsgs = state.messages[topicId] || [];
