@@ -179,7 +179,13 @@ export const PeerProvider = ({ children }) => {
         const meshPeers = currentPeer?.peers ? currentPeer.peers().length : 0;
         if (meshPeers > 0) {
           retryDelayMs = RETRY_INITIAL_MS; // real recovery re-arms fast retry
-          AxonaChatClient.replayPendingSends();
+          // WAIT for the new session's SUBs to be seated before republishing.
+          // A replay that goes out first has nobody registered to hear its
+          // echo, and on a live-tail subscription that echo never comes again:
+          // the message would be delivered and stay marked NOT DELIVERED
+          // forever (Aster, CHANGES-REQUIRED 8d37e65).
+          await AxonaChatClient.whenSeated();
+          await AxonaChatClient.replayPendingSends();
         }
       } finally {
         recovering = false;

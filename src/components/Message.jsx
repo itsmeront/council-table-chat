@@ -17,14 +17,26 @@ const PANEL_TOL = 60;
 // How far the arrow buttons advance per press — most of a panel, with overlap
 // so no line is ever skipped across a step.
 const ARROW_STEP = Math.round(PANEL_H * 0.8);
-// Touch-primary devices never ARM the panel (Aster, CHANGES-REQUIRED
-// b0c204e): a tap has no mouse-leave to disarm it, so click-to-arm on touch
-// re-creates the #405 scroll trap permanently — swipes over the tile would
-// scroll the inner panel forever and never the list. On touch, the arrows
-// are the whole interaction: programmatic scrollBy works under
-// overflow:hidden, so stepping never needs the panel armed at all.
-const TOUCH_ONLY = typeof window !== 'undefined'
-  && !!window.matchMedia?.('(hover: none)').matches;
+// A FINGER never arms the panel (Aster, CHANGES-REQUIRED b0c204e and 8d37e65).
+// A tap has no mouse-leave to disarm it, so arming on touch re-creates the
+// #405 scroll trap permanently — swipes over the tile would scroll the inner
+// panel forever and never the list. Touch input has the arrows instead:
+// programmatic scrollBy works under overflow:hidden, so stepping never needs
+// the panel armed at all.
+//
+// This is decided PER EVENT from the pointer that produced it, not once at
+// module load from '(hover: none)'. A hybrid device — iPad with a keyboard
+// case, a Surface, a touchscreen laptop — reports hover:hover because a mouse
+// exists, while a finger tap on that same machine still reaches the click
+// handler. Classifying the DEVICE traps exactly those users; classifying the
+// POINTER cannot, because the finger and the mouse are then distinguished at
+// the moment either one is used.
+const isMousePointer = (type) => type === 'mouse';
+
+// Whether a cursor can hover here at all. Used ONLY for the hint text and the
+// pointer cursor — presentation. Never for arming.
+const canHover = typeof window !== 'undefined'
+  && !!window.matchMedia?.('(hover: hover)').matches;
 
 const Message = ({ envelope, activeTopic, onReply, onPrivateReply, level = 0 }) => {
   const { msgId, signerPubkey, ts } = envelope;
@@ -96,10 +108,19 @@ const Message = ({ envelope, activeTopic, onReply, onPrivateReply, level = 0 }) 
   // and reads "nothing below". Re-check once the clamp is actually in effect.
   useLayoutEffect(() => { updateEdges(); }, [isLong, armed]);
 
+  // What kind of pointer produced the click currently being handled. React's
+  // synthetic click carries no pointerType, so it is recorded on the pointerdown
+  // that precedes it. A click with no preceding pointerdown (keyboard, or a
+  // synthetic dispatch) leaves this null and does not arm — arming is a
+  // mouse-only affordance, and every other input has the arrows.
+  const lastPointerType = useRef(null);
+  const notePointer = (e) => { lastPointerType.current = e.pointerType || null; };
+
   // Arm on click — but not when the click was really something else: a link
   // or button doing its own job, or the mouseup end of a text selection.
   const handlePanelClick = (e) => {
-    if (!isLong || TOUCH_ONLY) return;
+    if (!isLong) return;
+    if (!isMousePointer(lastPointerType.current)) return;
     if (e.target.closest('a, button, iframe')) return;
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed) return;
@@ -317,10 +338,15 @@ const Message = ({ envelope, activeTopic, onReply, onPrivateReply, level = 0 }) 
       </div>
 
       <div
+        onPointerDown={notePointer}
         onClick={handlePanelClick}
         onMouseLeave={() => setArmed(false)}
-        title={isLong && !armed && !TOUCH_ONLY ? 'Long message — click to scroll it in place' : undefined}
-        style={isLong ? { position: 'relative', cursor: armed || TOUCH_ONLY ? 'auto' : 'pointer' } : undefined}
+        // The hint and the pointer cursor are mouse affordances. They key off
+        // hover capability, which is the right question for "will a cursor
+        // ever be here" — unlike ARMING, which must key off the pointer that
+        // actually touched the tile.
+        title={isLong && !armed && canHover ? 'Long message — click to scroll it in place' : undefined}
+        style={isLong ? { position: 'relative', cursor: armed || !canHover ? 'auto' : 'pointer' } : undefined}
       >
         <div
           ref={panelRef}

@@ -24,6 +24,8 @@ class AxonaChatClient {
     this.tickerTopic = { region: 'eagle', name: 'advertised-topics' };
     this._authorClassInflight = new Set(); // signers with a getAuthorClass pull in flight
     this._declaredKey = null;              // `${authorId}:${class}` last published, to avoid re-declaring
+    this._peerGen = 0;                     // bumped on every peer replacement
+    this._seated = Promise.resolve();      // resolves when the current peer's SUBs are seated
   }
 
   setPeer(peer) {
@@ -35,6 +37,15 @@ class AxonaChatClient {
     // traffic, and could never see the echo that confirms a replayed send
     // (Aster, CHANGES-REQUIRED f0a9f88).
     if (this.peer !== peer) {
+      // Clearing the map is not enough on its own. subscribeTo() awaits
+      // peer.sub() and then writes the handle; a call that started under the
+      // OLD peer can resolve after this clear and insert a dead handle back
+      // into the live map — even overwriting the new peer's handle for the
+      // same topic — and the next reconcile then treats that topic as seated.
+      // The generation counter is what makes a late arrival identifiable
+      // (Aster, CHANGES-REQUIRED 8d37e65). Native sub() has several awaited
+      // setup steps, so the window is real, not theoretical.
+      this._peerGen++;
       for (const [, sub] of this.activeSubscriptions) {
         try { sub.stop?.(); } catch { /* the old session may be half-dead */ }
       }
@@ -42,12 +53,24 @@ class AxonaChatClient {
     }
     this.peer = peer;
     if (peer) {
-      this.reconcileSubscriptions();
+      // Re-seating is OBSERVABLE. Recovery must not replay a pending send
+      // before the new session's subscription callbacks are registered: the
+      // replayed publish would go out with nobody listening for its echo, and
+      // on a live-tail subscription that echo never comes again — the send
+      // stays pending forever despite having been delivered.
+      this._seated = this.reconcileSubscriptions()
+        .catch((e) => { console.error('Subscription re-seating failed:', e); });
       this.startPresenceHeartbeat();
     } else {
+      this._seated = Promise.resolve();
       this.stopPresenceHeartbeat();
     }
+    return this._seated;
   }
+
+  // Await the current peer's subscription re-seating. Callers that publish
+  // and expect to observe their own echo (replay) must await this first.
+  whenSeated() { return this._seated; }
 
   async getActiveAuthor() {
     if (!this.peer) throw new Error('Peer not connected.');
@@ -166,17 +189,26 @@ class AxonaChatClient {
       }
     }
 
-    // Subscribe to new topics
+    // Subscribe to new topics. AWAITED as a set: this function's completion is
+    // what whenSeated() reports, and a fire-and-forget loop would report
+    // "seated" while every SUB was still in flight.
+    const seating = [];
     for (const id of expectedIds) {
       if (!this.activeSubscriptions.has(id)) {
         const topic = idToTopic.get(id);
-        this.subscribeTo(id, topic);
+        seating.push(this.subscribeTo(id, topic));
       }
     }
+    await Promise.all(seating);
   }
 
   async subscribeTo(topicId, descriptor) {
-    if (!this.peer) return;
+    // Capture BOTH the peer and the generation. Everything below must act on
+    // the session that was live when this call started — reading this.peer
+    // after an await can silently address a different session.
+    const peer = this.peer;
+    const gen = this._peerGen;
+    if (!peer) return;
 
     try {
       const isTicker = descriptor.name === this.tickerTopic.name;
@@ -315,6 +347,14 @@ class AxonaChatClient {
       // pure noise; everything else wants history.
       }, { since: isPresence ? 'latest' : 'all' });
 
+      // The session may have been replaced while sub() was resolving. A handle
+      // belonging to a dead peer must be STOPPED, never recorded: recording it
+      // reinstates the exact stale-map failure the generation guard exists to
+      // prevent, and can overwrite the live handle for this same topic.
+      if (gen !== this._peerGen) {
+        try { sub.stop?.(); } catch { /* already dead */ }
+        return;
+      }
       this.activeSubscriptions.set(topicId, sub);
 
       const isSpecial = isTicker || isPresence || descriptor.name.endsWith(':raw') || descriptor.name.startsWith('axona:metric:');
@@ -323,7 +363,7 @@ class AxonaChatClient {
         try {
           const hexId = await this.getTopicHexId(descriptor);
           const metricsDescriptor = metricTopic(hexId);
-          const metricsSub = await this.peer.sub(metricsDescriptor, (env) => {
+          const metricsSub = await peer.sub(metricsDescriptor, (env) => {
             try {
               const m = typeof env.message === 'string' ? JSON.parse(env.message) : env.message;
               if (m) {
@@ -338,6 +378,10 @@ class AxonaChatClient {
               console.error('Failed to parse metrics:', err);
             }
           }, { since: 'all' });
+          if (gen !== this._peerGen) {
+            try { metricsSub.stop?.(); } catch { /* already dead */ }
+            return;
+          }
           this.activeSubscriptions.set('metrics-' + topicId, metricsSub);
         } catch (err) {
           console.error('Failed to subscribe to metrics for ' + descriptor.name, err);
@@ -349,7 +393,11 @@ class AxonaChatClient {
   }
 
   async subscribeToPrivateContinuation(topicName, key, partnerId) {
-    if (!this.peer) return;
+    // Same capture-and-check as subscribeTo: this path awaits sub() and writes
+    // a handle, so it has the identical late-arrival hazard.
+    const peer = this.peer;
+    const gen = this._peerGen;
+    if (!peer) return;
 
     const descriptor = { region: 'eagle', name: topicName, write: 'open' };
     const id = await this.getTopicHexId(descriptor);
@@ -357,7 +405,7 @@ class AxonaChatClient {
     if (this.activeSubscriptions.has(id)) return;
 
     try {
-      const sub = await this.peer.sub(descriptor, (envelope) => {
+      const sub = await peer.sub(descriptor, (envelope) => {
         const payload = envelope.message;
         if (payload && payload.ciphertext) {
           const decrypted = CryptoService.decryptSymmetric(payload.ciphertext, key);
@@ -372,6 +420,10 @@ class AxonaChatClient {
         }
       }, { since: 'all' });
 
+      if (gen !== this._peerGen) {
+        try { sub.stop?.(); } catch { /* already dead */ }
+        return;
+      }
       this.activeSubscriptions.set(id, sub);
     } catch (e) {
       console.error('Failed private continuation sub:', e);
