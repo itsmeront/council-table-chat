@@ -119,8 +119,16 @@ const Message = ({ envelope, activeTopic, onReply, onPrivateReply, level = 0 }) 
   // Arm on click — but not when the click was really something else: a link
   // or button doing its own job, or the mouseup end of a text selection.
   const handlePanelClick = (e) => {
+    // CONSUME the recorded pointer. It belongs to exactly one click. Left in
+    // place it survives as 'mouse' after any real mouse click, so the next
+    // click WITHOUT a pointerdown — keyboard activation, a synthetic dispatch —
+    // inherits it and arms. That is the same "a device said it was safe" error
+    // one level down, and this file's own comment claimed otherwise while the
+    // code did it (Aster, CHANGES-REQUIRED 6af3ed6).
+    const pointer = lastPointerType.current;
+    lastPointerType.current = null;
     if (!isLong) return;
-    if (!isMousePointer(lastPointerType.current)) return;
+    if (!isMousePointer(pointer)) return;
     if (e.target.closest('a, button, iframe')) return;
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed) return;

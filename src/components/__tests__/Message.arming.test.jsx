@@ -117,4 +117,33 @@ describe('Message long-panel arming is decided by the POINTER, not the device', 
     fireEvent.click(tile());
     expect(armedNow()).toBe(false);
   });
+
+  // The case the previous round got wrong. Testing a bare click only from a
+  // FRESH component proves nothing about the recorded pointer, because it was
+  // never set. The failure needs a real mouse click first to leave 'mouse'
+  // behind (Aster, CHANGES-REQUIRED 6af3ed6).
+  it('a bare click AFTER a mouse click does not inherit the mouse pointer', () => {
+    render(<Message envelope={envelope} activeTopic={{ region: 'eagle', name: 'lobby' }} />);
+    const el = tile();
+    fireEvent.pointerDown(el, { pointerType: 'mouse' });
+    fireEvent.click(el);                       // arms
+    expect(armedNow()).toBe(true);
+    fireEvent.pointerDown(el, { pointerType: 'mouse' });
+    fireEvent.click(el);                       // disarms — state is now unarmed
+    expect(armedNow()).toBe(false);
+
+    // No pointerdown this time. Pre-fix, lastPointerType is still 'mouse' and
+    // this arms the tile.
+    fireEvent.click(el);
+    expect(armedNow()).toBe(false);
+  });
+
+  it('a bare click after a TOUCH tap likewise does not arm', () => {
+    render(<Message envelope={envelope} activeTopic={{ region: 'eagle', name: 'lobby' }} />);
+    const el = tile();
+    fireEvent.pointerDown(el, { pointerType: 'touch' });
+    fireEvent.click(el);
+    fireEvent.click(el);
+    expect(armedNow()).toBe(false);
+  });
 });

@@ -123,6 +123,53 @@ describe('setPeer — peer replacement re-seats subscriptions', () => {
   // The matching ordering hole: replay must not publish before the new
   // session's SUBs are seated, or the echo that clears the pending record is
   // never heard on a live-tail subscription.
+  // Aster, CHANGES-REQUIRED 6af3ed6. PeerContext and ChatShell BOTH call
+  // setPeer with the same peer object. The generation is unchanged so nothing
+  // is cleared, but each call used to launch its own reconciliation; two of
+  // them observe an empty map while sub() awaits, and both subscribe. The map
+  // keeps one handle and the other callback stays live forever, delivering
+  // every message twice.
+  it('two setPeer calls with the SAME peer produce exactly one SUB per topic', async () => {
+    const peerB = makeFakePeer('B', 60);        // sub() open across both calls
+    const first = AxonaChatClient.setPeer(peerB);
+    const second = AxonaChatClient.setPeer(peerB);   // the duplicate owner
+    expect(second).toBe(first);                 // coalesced, not a second run
+    await Promise.all([first, second]);
+    await new Promise(r => setTimeout(r, 50));
+
+    const perTopic = new Map();
+    for (const d of peerB.subCalls) {
+      const k = JSON.stringify(d);
+      perTopic.set(k, (perTopic.get(k) || 0) + 1);
+    }
+    const doubled = [...perTopic.entries()].filter(([, n]) => n > 1);
+    expect(doubled).toEqual([]);                 // pre-fix: every topic twice
+    expect(AxonaChatClient.activeSubscriptions.size).toBe(peerB.subCalls.length);
+    AxonaChatClient.setPeer(null);
+  });
+
+  // A SUB that rejects must not be reported as seated. subscribeTo catches its
+  // own rejection so Promise.all still resolves; replay therefore has to ask
+  // per topic, not trust the batch.
+  it('a topic whose sub() REJECTS is not recorded as seated', async () => {
+    const peerB = makeFakePeer('B');
+    const realSub = peerB.sub;
+    peerB.sub = async (descriptor) => {
+      if (descriptor.name === 'lobby') throw new Error('sub refused');
+      return realSub(descriptor);
+    };
+    await AxonaChatClient.setPeer(peerB);       // resolves despite the failure
+    await new Promise(r => setTimeout(r, 50));
+
+    const lobbyId = await AxonaChatClient.getTopicHexId(
+      { region: 'eagle', name: 'lobby', write: 'open' });
+    expect(AxonaChatClient._seatedTopicIds.has(lobbyId)).toBe(false);
+    // The topics that DID seat are still recorded — this is per-topic, not
+    // an all-or-nothing flag.
+    expect(AxonaChatClient._seatedTopicIds.size).toBeGreaterThan(0);
+    AxonaChatClient.setPeer(null);
+  });
+
   it('whenSeated() resolves only after every SUB is seated', async () => {
     const peerB = makeFakePeer('B', 80);
     const seated = AxonaChatClient.setPeer(peerB);

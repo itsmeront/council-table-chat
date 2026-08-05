@@ -26,9 +26,20 @@ class AxonaChatClient {
     this._declaredKey = null;              // `${authorId}:${class}` last published, to avoid re-declaring
     this._peerGen = 0;                     // bumped on every peer replacement
     this._seated = Promise.resolve();      // resolves when the current peer's SUBs are seated
+    this._seatedTopicIds = new Set();      // topicIds POSITIVELY seated on the current peer
   }
 
   setPeer(peer) {
+    // Idempotent for the same peer object. PeerContext calls this on connect
+    // and ChatShell's [peer] effect calls it again with the IDENTICAL object.
+    // The generation is unchanged, so nothing is cleared — but each call used
+    // to start its own reconcileSubscriptions(), and two concurrent
+    // reconciliations both observe an empty map while peer.sub is awaiting.
+    // Both then subscribe: the map keeps the last handle and the other
+    // callback stays live and unreferenced, delivering duplicates forever.
+    // Coalesce onto the in-flight seating instead of racing a second one
+    // (Aster, CHANGES-REQUIRED 6af3ed6).
+    if (this.peer === peer) return this._seated;
     // Peer replacement invalidates every subscription handle — each belongs
     // to the OLD peer's session. Stop and clear them so reconcile re-issues
     // every SUB on the new peer, instead of skipping topics that look
@@ -36,7 +47,7 @@ class AxonaChatClient {
     // recovered session held a map full of dead handles, received no topic
     // traffic, and could never see the echo that confirms a replayed send
     // (Aster, CHANGES-REQUIRED f0a9f88).
-    if (this.peer !== peer) {
+    {
       // Clearing the map is not enough on its own. subscribeTo() awaits
       // peer.sub() and then writes the handle; a call that started under the
       // OLD peer can resolve after this clear and insert a dead handle back
@@ -50,6 +61,7 @@ class AxonaChatClient {
         try { sub.stop?.(); } catch { /* the old session may be half-dead */ }
       }
       this.activeSubscriptions.clear();
+      this._seatedTopicIds.clear();   // seating is per-session, like the handles
     }
     this.peer = peer;
     if (peer) {
@@ -58,11 +70,18 @@ class AxonaChatClient {
       // replayed publish would go out with nobody listening for its echo, and
       // on a live-tail subscription that echo never comes again — the send
       // stays pending forever despite having been delivered.
+      //
+      // The catch keeps a seating failure from becoming an unhandled
+      // rejection, and DELIBERATELY does not launder it into success: what
+      // counts as seated is _seatedTopicIds, which only a subscription that
+      // actually returned a handle can enter. Resolving this promise has never
+      // meant "everything seated" — replay asks the set, per topic.
       this._seated = this.reconcileSubscriptions()
         .catch((e) => { console.error('Subscription re-seating failed:', e); });
       this.startPresenceHeartbeat();
     } else {
       this._seated = Promise.resolve();
+      this._seatedTopicIds.clear();
       this.stopPresenceHeartbeat();
     }
     return this._seated;
@@ -214,7 +233,7 @@ class AxonaChatClient {
       const isTicker = descriptor.name === this.tickerTopic.name;
       const isPresence = descriptor.name === this.heartbeatTopic.name;
 
-      const sub = await this.peer.sub(descriptor, (envelope) => {
+      const sub = await peer.sub(descriptor, (envelope) => {
         // Send confirmation: our own envelope arriving counts as delivered
         // ONLY while the session has peers. On a zero-peer island the local
         // node roots the topic itself and echoes the publish straight back —
@@ -356,6 +375,11 @@ class AxonaChatClient {
         return;
       }
       this.activeSubscriptions.set(topicId, sub);
+      // POSITIVELY seated: a handle exists on the live peer for this topic.
+      // Only this line may add to the set. A sub() that threw lands in the
+      // catch below and adds nothing, so replay can tell "listening" from
+      // "we tried" (Aster, CHANGES-REQUIRED 6af3ed6).
+      this._seatedTopicIds.add(topicId);
 
       const isSpecial = isTicker || isPresence || descriptor.name.endsWith(':raw') || descriptor.name.startsWith('axona:metric:');
       
@@ -524,6 +548,19 @@ class AxonaChatClient {
     if (!this.peer) return;
     const pending = useChatStore.getState().pendingSends;
     for (const [msgId, rec] of Object.entries(pending)) {
+      // Replay ONLY onto a topic this session positively seated. whenSeated()
+      // resolving is not that guarantee: subscribeTo catches its own sub()
+      // rejection, so a topic whose subscription failed still lets the batch
+      // resolve. Publishing there reproduces the missed-echo bug through the
+      // error path instead of the race — delivered, and marked NOT DELIVERED
+      // forever, because nothing is listening for the echo that clears it.
+      // Leaving the record pending is correct: the watchdog rebuilds again,
+      // and content-addressed msgIds make a later replay idempotent
+      // (Aster, CHANGES-REQUIRED 6af3ed6).
+      if (!this._seatedTopicIds.has(rec.topicId)) {
+        console.warn(`[axona-chat] replay HELD for ${msgId.slice(0, 10)}… — its topic is not seated on this session`);
+        continue;
+      }
       try {
         const author = await createAuthorIdentity({ persistAs: rec.authorRef });
         await this.peer.pub(rec.descriptor, rec.payload, { signWith: author });
