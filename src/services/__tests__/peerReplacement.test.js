@@ -43,6 +43,17 @@ const makeFakePeer = (name, subDelayMs = 0) => {
   return p;
 };
 
+// One definition of the lobby topic and its STORE key. The bug this file now
+// fences came from two places deriving an id differently; a fixture keeps the
+// test from repeating that.
+const LOBBY = { region: 'eagle', name: 'lobby', write: 'open' };
+const LOBBY_KEY = `${LOBBY.region}::${LOBBY.name}:${LOBBY.write}`;
+const pendingLobby = () => ({
+  topicId: LOBBY_KEY, descriptor: LOBBY,
+  payload: { v: 1, text: 'pending' }, authorRef: 'someone',
+  at: 1785960000000, island: true,
+});
+
 describe('setPeer — peer replacement re-seats subscriptions', () => {
   beforeEach(() => {
     useChatStore.setState({
@@ -151,7 +162,15 @@ describe('setPeer — peer replacement re-seats subscriptions', () => {
   // A SUB that rejects must not be reported as seated. subscribeTo catches its
   // own rejection so Promise.all still resolves; replay therefore has to ask
   // per topic, not trust the batch.
-  it('a topic whose sub() REJECTS is not recorded as seated', async () => {
+  //
+  // This assertion was itself broken until now (Aster, 837c1a0): it checked the
+  // protocol HEX id, which _seatedTopicIds no longer contains for any topic. It
+  // was therefore true for every state of the world — including an
+  // implementation that wrongly recorded the rejected lobby under its store
+  // key, the exact defect it claims to guard. Same failure as the mismatch it
+  // was written alongside, in the test rather than the code, and it survived a
+  // round because "the negative passes" reads like evidence.
+  it('a topic whose sub() REJECTS is not seated, and its pending send is HELD', async () => {
     const peerB = makeFakePeer('B');
     const realSub = peerB.sub;
     peerB.sub = async (descriptor) => {
@@ -161,12 +180,20 @@ describe('setPeer — peer replacement re-seats subscriptions', () => {
     await AxonaChatClient.setPeer(peerB);       // resolves despite the failure
     await new Promise(r => setTimeout(r, 50));
 
-    const lobbyId = await AxonaChatClient.getTopicHexId(
-      { region: 'eagle', name: 'lobby', write: 'open' });
-    expect(AxonaChatClient._seatedTopicIds.has(lobbyId)).toBe(false);
+    // The STORE key — the id the set actually holds and pendingSends carries.
+    expect(AxonaChatClient._seatedTopicIds.has(LOBBY_KEY)).toBe(false);
     // The topics that DID seat are still recorded — this is per-topic, not
     // an all-or-nothing flag.
     expect(AxonaChatClient._seatedTopicIds.size).toBeGreaterThan(0);
+
+    // And the property that matters, stated behaviourally: a pending send for
+    // the unseated topic must not go out. Asserting set membership alone would
+    // pass again the next time the keys drift.
+    useChatStore.setState({ pendingSends: { 'msg-r': pendingLobby() } });
+    const before = peerB.pubs.length;
+    await AxonaChatClient.replayPendingSends();
+    expect(peerB.pubs.length).toBe(before);
+    useChatStore.setState({ pendingSends: {} });
     AxonaChatClient.setPeer(null);
   });
 
@@ -186,23 +213,39 @@ describe('setPeer — peer replacement re-seats subscriptions', () => {
     await new Promise(r => setTimeout(r, 50));
 
     // Record a pending send exactly as publish() does — same key derivation.
-    const descriptor = { region: 'eagle', name: 'lobby', write: 'open' };
-    const storeKey = `${descriptor.region}::${descriptor.name}:${descriptor.write}`;
-    useChatStore.setState({
-      pendingSends: {
-        'msg-1': {
-          topicId: storeKey, descriptor,
-          payload: { v: 1, text: 'held?' },
-          authorRef: 'someone', at: Date.now(), island: true,
-        },
-      },
-    });
+    const descriptor = LOBBY;
+    useChatStore.setState({ pendingSends: { 'msg-1': pendingLobby() } });
 
     const pubsBefore = peerB.pubs.length;
     await AxonaChatClient.replayPendingSends();
     // Pre-fix: zero pubs, one "replay HELD" warning, message never resent.
     expect(peerB.pubs.length).toBe(pubsBefore + 1);
     expect(peerB.pubs[peerB.pubs.length - 1]).toEqual(descriptor);
+
+    useChatStore.setState({ pendingSends: {} });
+    AxonaChatClient.setPeer(null);
+  });
+
+  // The other leg of the gate (Aster, 837c1a0). Seating must be RETIRED when a
+  // topic's handle is stopped, or "seated" quietly means "was seated once" and
+  // a later pending send publishes into a topic with no live callback.
+  it('a topic REMOVED from the subscription list stops being seated, and its replay is HELD', async () => {
+    const peerB = makeFakePeer('B');
+    await AxonaChatClient.setPeer(peerB);
+    await new Promise(r => setTimeout(r, 50));
+    expect(AxonaChatClient._seatedTopicIds.has(LOBBY_KEY)).toBe(true);   // seated
+
+    // Drop lobby from the store and reconcile: its handle is stopped.
+    useChatStore.setState({ subscribedTopics: [] });
+    await AxonaChatClient.reconcileSubscriptions();
+    await new Promise(r => setTimeout(r, 30));
+    expect(AxonaChatClient._seatedTopicIds.has(LOBBY_KEY)).toBe(false);  // retired
+
+    // A pending send arriving now must not be published — nothing is listening.
+    useChatStore.setState({ pendingSends: { 'msg-x': pendingLobby() } });
+    const before = peerB.pubs.length;
+    await AxonaChatClient.replayPendingSends();
+    expect(peerB.pubs.length).toBe(before);
 
     useChatStore.setState({ pendingSends: {} });
     AxonaChatClient.setPeer(null);
