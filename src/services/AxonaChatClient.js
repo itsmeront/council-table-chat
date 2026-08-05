@@ -27,6 +27,9 @@ class AxonaChatClient {
     this._peerGen = 0;                     // bumped on every peer replacement
     this._seated = Promise.resolve();      // resolves when the current peer's SUBs are seated
     this._seatedTopicIds = new Set();      // topicIds POSITIVELY seated on the current peer
+    this._topicKeyByHex = new Map();       // protocol hex id -> store key, so a
+                                           // stopped subscription can find the
+                                           // seating entry it must retire
   }
 
   setPeer(peer) {
@@ -62,6 +65,7 @@ class AxonaChatClient {
       }
       this.activeSubscriptions.clear();
       this._seatedTopicIds.clear();   // seating is per-session, like the handles
+      this._topicKeyByHex.clear();
     }
     this.peer = peer;
     if (peer) {
@@ -82,6 +86,7 @@ class AxonaChatClient {
     } else {
       this._seated = Promise.resolve();
       this._seatedTopicIds.clear();
+      this._topicKeyByHex.clear();
       this.stopPresenceHeartbeat();
     }
     return this._seated;
@@ -205,6 +210,16 @@ class AxonaChatClient {
       if (!expectedIds.has(baseId)) {
         sub.stop();
         this.activeSubscriptions.delete(id);
+        // Seating dies with the handle. Leaving the entry behind would let a
+        // LATER pending send replay against a topic with no live callback —
+        // "seated" would mean "was seated once", which is the same
+        // stale-bookkeeping error as the dead-handle map (Aster, 14e949b).
+        // The store key comes from _topicKeyByHex, NOT from idToTopic: a topic
+        // being removed is by construction absent from the expected set, so
+        // idToTopic cannot describe it.
+        const goneKey = this._topicKeyByHex.get(baseId);
+        if (goneKey) { this._seatedTopicIds.delete(goneKey); }
+        this._topicKeyByHex.delete(id);
       }
     }
 
@@ -379,7 +394,15 @@ class AxonaChatClient {
       // Only this line may add to the set. A sub() that threw lands in the
       // catch below and adds nothing, so replay can tell "listening" from
       // "we tried" (Aster, CHANGES-REQUIRED 6af3ed6).
-      this._seatedTopicIds.add(topicId);
+      //
+      // Keyed by the STORE key, not by topicId. topicId here is the protocol
+      // hex id; pendingSends records getTopicId(descriptor). Adding the hex id
+      // made `has(rec.topicId)` false for every record, so v0.47.3 held EVERY
+      // replay forever — the gate meant to protect recovery disabled it
+      // instead. One canonical id on both sides, and it must be the one the
+      // pending record already carries (Aster, CHANGES-REQUIRED 14e949b).
+      this._seatedTopicIds.add(getTopicId(descriptor));
+      this._topicKeyByHex.set(topicId, getTopicId(descriptor));
 
       const isSpecial = isTicker || isPresence || descriptor.name.endsWith(':raw') || descriptor.name.startsWith('axona:metric:');
       

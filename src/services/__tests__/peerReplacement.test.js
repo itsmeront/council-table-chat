@@ -170,6 +170,44 @@ describe('setPeer — peer replacement re-seats subscriptions', () => {
     AxonaChatClient.setPeer(null);
   });
 
+  // THE case v0.47.3 got wrong, and the one its tests could not see (Aster,
+  // CHANGES-REQUIRED 14e949b). The seating gate compared a protocol hex id
+  // against a store key, so `has(rec.topicId)` was false for EVERY pending
+  // record: recovery held every replay forever, and the gate written to protect
+  // replay disabled it instead. The old test only asserted that a REJECTED sub
+  // is absent from the set — true either way, and therefore blind to this.
+  //
+  // A guard that only ever checks the negative cannot detect a predicate that
+  // is always false. This asserts the POSITIVE end-to-end: a normal topic that
+  // seated successfully must actually be republished.
+  it('a pending send on a SEATED topic is actually replayed (not held)', async () => {
+    const peerB = makeFakePeer('B');
+    await AxonaChatClient.setPeer(peerB);
+    await new Promise(r => setTimeout(r, 50));
+
+    // Record a pending send exactly as publish() does — same key derivation.
+    const descriptor = { region: 'eagle', name: 'lobby', write: 'open' };
+    const storeKey = `${descriptor.region}::${descriptor.name}:${descriptor.write}`;
+    useChatStore.setState({
+      pendingSends: {
+        'msg-1': {
+          topicId: storeKey, descriptor,
+          payload: { v: 1, text: 'held?' },
+          authorRef: 'someone', at: Date.now(), island: true,
+        },
+      },
+    });
+
+    const pubsBefore = peerB.pubs.length;
+    await AxonaChatClient.replayPendingSends();
+    // Pre-fix: zero pubs, one "replay HELD" warning, message never resent.
+    expect(peerB.pubs.length).toBe(pubsBefore + 1);
+    expect(peerB.pubs[peerB.pubs.length - 1]).toEqual(descriptor);
+
+    useChatStore.setState({ pendingSends: {} });
+    AxonaChatClient.setPeer(null);
+  });
+
   it('whenSeated() resolves only after every SUB is seated', async () => {
     const peerB = makeFakePeer('B', 80);
     const seated = AxonaChatClient.setPeer(peerB);
