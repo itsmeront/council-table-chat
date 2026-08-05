@@ -11,9 +11,12 @@ import { extractUrls, isImageUrl, isYouTubeUrl, isAxonaNameUrl } from '../servic
 
 // Long-message panel height: comfortably smaller than the viewport so a
 // single message can never dominate the list.
-const PAGE_H = Math.min(360, Math.round(window.innerHeight * 0.45));
-// A message only a little over the panel height isn't worth paging.
-const PAGE_TOL = 60;
+const PANEL_H = Math.min(360, Math.round(window.innerHeight * 0.45));
+// A message only a little over the panel height isn't worth capping.
+const PANEL_TOL = 60;
+// How far the arrow buttons advance per press — most of a panel, with overlap
+// so no line is ever skipped across a step.
+const ARROW_STEP = Math.round(PANEL_H * 0.8);
 
 const Message = ({ envelope, activeTopic, onReply, onPrivateReply, level = 0 }) => {
   const { msgId, signerPubkey, ts } = envelope;
@@ -25,56 +28,73 @@ const Message = ({ envelope, activeTopic, onReply, onPrivateReply, level = 0 }) 
   const [showConfirm, setShowConfirm] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  // Long-message paging: content taller than PAGE_H renders inside a
-  // fixed-height panel stepped with Previous/Next — deliberately NOT an
-  // inner scrollbar, which would fight the message list's own scrolling.
+  // Long-message handling: content taller than PANEL_H renders inside a
+  // fixed-height panel that scrolls — but ONLY once the reader clicks it.
   //
-  // Pages break ONLY at block boundaries (paragraphs, headings, list items,
-  // tables), never on a fixed pixel step. A blind step used to slice through
-  // whatever line straddled the panel edge and only restore it if it was
-  // shorter than a fixed overlap — so headings, list items, and table rows
-  // (taller than that overlap) stayed clipped and unreadable. Snapping to the
-  // top of the first block that would overflow guarantees no page ever cuts a
-  // block in half. pageOffsets[i] is the translateY (in px) for page i.
+  // This replaces the Previous/Next paging (v0.45), whose page offsets were
+  // measured once and then falsified by late-loading embeds: pages overlapped,
+  // spilled past the panel edge, or left a near-empty last page. A plain inner
+  // scrollbar was rejected back then for a real reason — it traps the wheel,
+  // so scrolling the LIST stalls whenever the pointer crosses a long message
+  // (issue #405). The click-to-arm scheme keeps both behaviours: while the
+  // panel is unarmed its overflow is hidden, wheel events find nothing to
+  // scroll and fall through to the list; a click arms it (overflow:auto with
+  // overscroll-behavior:contain, so hitting its end doesn't yank the list);
+  // the pointer leaving the tile disarms it again. Wherever the pointer is,
+  // the thing under it scrolls the way the reader expects.
+  //
+  // Affordances: fade gradients show clipped content above/below, and an
+  // arrow button appears at each edge only while that direction can actually
+  // scroll. The arrows work without arming first — pressing one arms the
+  // panel and steps it by ARROW_STEP.
   const contentRef = useRef(null);
-  const [pageOffsets, setPageOffsets] = useState([0]);
-  const [page, setPage] = useState(0);
-  const pageCount = pageOffsets.length;
+  const panelRef = useRef(null);
+  const [isLong, setIsLong] = useState(false);
+  const [armed, setArmed] = useState(false);
+  const [canUp, setCanUp] = useState(false);
+  const [canDown, setCanDown] = useState(false);
+
+  const updateEdges = () => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    // 4px slack: fractional scroll positions on zoomed displays never quite
+    // reach the exact limit, and an arrow that won't disappear reads as broken.
+    setCanUp(panel.scrollTop > 4);
+    setCanDown(panel.scrollTop + panel.clientHeight < panel.scrollHeight - 4);
+  };
+
   useLayoutEffect(() => {
     const content = contentRef.current;
     if (!content) return;
     const measure = () => {
-      if (content.scrollHeight <= PAGE_H + PAGE_TOL) {
-        setPageOffsets([0]);
-        setPage(0);
-        return;
-      }
-      // The block list is the content's direct children (markdown blocks plus
-      // the trailing embeds container). If markdown ever renders under a single
-      // wrapper, descend one level so we still break on real blocks.
-      let blocks = Array.from(content.children);
-      if (blocks.length <= 1 && blocks[0]) blocks = Array.from(blocks[0].children);
-      const offsets = [0];
-      let start = 0;
-      for (const b of blocks) {
-        const top = b.offsetTop;
-        const bottom = top + b.offsetHeight;
-        // This block spills past the current page and doesn't itself begin it:
-        // start a fresh page at its top. (A lone block taller than the panel
-        // still gets its own page — unavoidable, and rare: a huge code block.)
-        if (bottom - start > PAGE_H && top > start) {
-          start = top;
-          offsets.push(start);
-        }
-      }
-      setPageOffsets(offsets);
-      setPage(p => Math.min(p, offsets.length - 1));
+      setIsLong(content.scrollHeight > PANEL_H + PANEL_TOL);
+      updateEdges();
     };
     measure();
     const ro = new ResizeObserver(measure);   // re-measure as embeds load
     ro.observe(content);
     return () => ro.disconnect();
   }, []);
+
+  // The measure above runs BEFORE the render that applies the maxHeight clamp,
+  // so its edge check sees an unclamped panel (clientHeight === scrollHeight)
+  // and reads "nothing below". Re-check once the clamp is actually in effect.
+  useLayoutEffect(() => { updateEdges(); }, [isLong, armed]);
+
+  // Arm on click — but not when the click was really something else: a link
+  // or button doing its own job, or the mouseup end of a text selection.
+  const handlePanelClick = (e) => {
+    if (!isLong) return;
+    if (e.target.closest('a, button, iframe')) return;
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) return;
+    setArmed(a => !a);
+  };
+
+  const scrollStep = (dir) => {
+    setArmed(true);
+    panelRef.current?.scrollBy({ top: dir * ARROW_STEP, behavior: 'smooth' });
+  };
 
   // Resolve the sender's signed author-class on demand (cached in the store, one
   // pull per author) so the badge paints even for messages that arrived before
@@ -184,8 +204,8 @@ const Message = ({ envelope, activeTopic, onReply, onPrivateReply, level = 0 }) 
 
   const displayText = payload.isEncrypted ? payload.decryptedText : payload.md || payload.text || '';
 
-  // Copy the WHOLE message source — especially useful for long/paged messages,
-  // where the reader can only ever see one page at a time.
+  // Copy the WHOLE message source — especially useful for long messages,
+  // where only part of the text is on screen at once.
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(displayText || '');
@@ -263,17 +283,33 @@ const Message = ({ envelope, activeTopic, onReply, onPrivateReply, level = 0 }) 
         </span>
       </div>
 
-      <div style={pageCount > 1 ? { height: `${PAGE_H}px`, overflow: 'hidden' } : undefined}>
+      <div
+        onClick={handlePanelClick}
+        onMouseLeave={() => setArmed(false)}
+        title={isLong && !armed ? 'Long message — click to scroll it in place' : undefined}
+        style={isLong ? { position: 'relative', cursor: armed ? 'auto' : 'pointer' } : undefined}
+      >
+        <div
+          ref={panelRef}
+          onScroll={updateEdges}
+          style={isLong ? {
+            maxHeight: `${PANEL_H}px`,
+            overflowY: armed ? 'auto' : 'hidden',
+            // Hitting the panel's end must not chain into the list — the
+            // reader armed THIS tile, not the page behind it.
+            overscrollBehavior: 'contain',
+            borderRadius: '4px',
+            // A quiet ring while armed, so it's visible which surface the
+            // wheel now drives.
+            boxShadow: armed ? '0 0 0 1px var(--color-primary) inset' : 'none',
+            transition: 'box-shadow 0.15s ease'
+          } : undefined}
+        >
         <div
           ref={contentRef}
           className="message-content"
           style={{
-            // position:relative makes this the offsetParent, so each block's
-            // offsetTop (used for page boundaries above) is measured from here.
-            position: 'relative',
-            fontSize: '0.9rem', lineHeight: '1.4', wordBreak: 'break-word', color: 'var(--color-text)',
-            transform: pageCount > 1 ? `translateY(-${pageOffsets[page] || 0}px)` : undefined,
-            transition: 'transform 0.2s ease'
+            fontSize: '0.9rem', lineHeight: '1.4', wordBreak: 'break-word', color: 'var(--color-text)'
           }}
         >
           <ReactMarkdown
@@ -308,43 +344,67 @@ const Message = ({ envelope, activeTopic, onReply, onPrivateReply, level = 0 }) 
           </ReactMarkdown>
           {renderEmbeds(displayText)}
         </div>
-      </div>
-
-      {pageCount > 1 && (
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.75rem', marginTop: '0.35rem', fontSize: '0.72rem' }}>
-          <button
-            onClick={() => setPage(p => Math.max(0, p - 1))}
-            disabled={page === 0}
-            title="This message is long — page back up through it"
-            style={{
-              padding: '0.15rem 0.6rem', borderRadius: '4px', cursor: page === 0 ? 'default' : 'pointer',
-              border: '1px solid var(--border-color)', background: 'transparent',
-              color: page === 0 ? 'var(--color-muted)' : 'var(--color-primary)', fontWeight: '600'
-            }}
-          >
-            ▲ Previous
-          </button>
-          <span style={{ color: 'var(--color-muted)' }}>{page + 1} / {pageCount}</span>
-          <button
-            onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))}
-            disabled={page >= pageCount - 1}
-            title="This message is long — page down through it"
-            style={{
-              padding: '0.15rem 0.6rem', borderRadius: '4px', cursor: page >= pageCount - 1 ? 'default' : 'pointer',
-              border: '1px solid var(--border-color)', background: 'transparent',
-              color: page >= pageCount - 1 ? 'var(--color-muted)' : 'var(--color-primary)', fontWeight: '600'
-            }}
-          >
-            Next ▼
-          </button>
         </div>
-      )}
+
+        {/* Edge affordances: each fade says "there is more this way", each
+            arrow steps it. Both exist only while that direction can move, so
+            their absence is the completion signal. pointerEvents:none on the
+            fades keeps text under them selectable and clickable. */}
+        {isLong && canUp && (
+          <>
+            <div style={{
+              position: 'absolute', top: 0, left: 0, right: 0, height: '2.2rem',
+              background: 'linear-gradient(to bottom, var(--color-surface), transparent)',
+              pointerEvents: 'none', borderRadius: '4px 4px 0 0'
+            }} />
+            <button
+              onClick={(e) => { e.stopPropagation(); scrollStep(-1); }}
+              title="Scroll this message up"
+              aria-label="Scroll this message up"
+              style={{
+                position: 'absolute', top: '0.25rem', left: '50%', transform: 'translateX(-50%)',
+                width: '1.6rem', height: '1.6rem', borderRadius: '50%', cursor: 'pointer',
+                border: '1px solid var(--border-color)', background: 'var(--color-surface)',
+                color: 'var(--color-primary)', fontSize: '0.7rem', lineHeight: 1,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.25)'
+              }}
+            >
+              ▲
+            </button>
+          </>
+        )}
+        {isLong && canDown && (
+          <>
+            <div style={{
+              position: 'absolute', bottom: 0, left: 0, right: 0, height: '2.2rem',
+              background: 'linear-gradient(to top, var(--color-surface), transparent)',
+              pointerEvents: 'none', borderRadius: '0 0 4px 4px'
+            }} />
+            <button
+              onClick={(e) => { e.stopPropagation(); scrollStep(1); }}
+              title="Scroll this message down"
+              aria-label="Scroll this message down"
+              style={{
+                position: 'absolute', bottom: '0.25rem', left: '50%', transform: 'translateX(-50%)',
+                width: '1.6rem', height: '1.6rem', borderRadius: '50%', cursor: 'pointer',
+                border: '1px solid var(--border-color)', background: 'var(--color-surface)',
+                color: 'var(--color-primary)', fontSize: '0.7rem', lineHeight: 1,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.25)'
+              }}
+            >
+              ▼
+            </button>
+          </>
+        )}
+      </div>
 
       {/* Action Footer */}
       <div style={{ display: 'flex', gap: '1rem', marginTop: '0.2rem', justifyContent: 'flex-end', fontSize: '0.7rem' }}>
         <span
           onClick={handleCopy}
-          title="Copy the full message text — grabs the whole message, not just the visible page"
+          title="Copy the full message text — grabs the whole message, not just the visible part"
           style={{ color: copied ? 'var(--color-success)' : 'var(--color-muted)', cursor: 'pointer', transition: 'color 0.2s' }}
           onMouseEnter={(e) => { if (!copied) e.target.style.color = 'var(--color-primary)'; }}
           onMouseLeave={(e) => { if (!copied) e.target.style.color = 'var(--color-muted)'; }}
