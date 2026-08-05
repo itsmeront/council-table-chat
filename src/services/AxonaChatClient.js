@@ -27,6 +27,19 @@ class AxonaChatClient {
   }
 
   setPeer(peer) {
+    // Peer replacement invalidates every subscription handle — each belongs
+    // to the OLD peer's session. Stop and clear them so reconcile re-issues
+    // every SUB on the new peer, instead of skipping topics that look
+    // already-subscribed but are wired to a dead session. Without this, a
+    // recovered session held a map full of dead handles, received no topic
+    // traffic, and could never see the echo that confirms a replayed send
+    // (Aster, CHANGES-REQUIRED f0a9f88).
+    if (this.peer !== peer) {
+      for (const [, sub] of this.activeSubscriptions) {
+        try { sub.stop?.(); } catch { /* the old session may be half-dead */ }
+      }
+      this.activeSubscriptions.clear();
+    }
     this.peer = peer;
     if (peer) {
       this.reconcileSubscriptions();

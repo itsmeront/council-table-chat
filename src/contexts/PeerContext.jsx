@@ -129,8 +129,14 @@ export const PeerProvider = ({ children }) => {
           if (result.disconnect) result.disconnect();
         };
 
-        // Fresh connection: reset the watchdog's memory of the old one.
-        everConnected = false;
+        // Fresh connection: reset the zero-peer stopwatch, but NOT
+        // everConnected — that flag means "this SESSION was ever connected",
+        // and it must survive rebuilds. Resetting it here was the retry
+        // killer Aster found (CHANGES-REQUIRED f0a9f88): connect() RESOLVES
+        // with {ready:false, peers:0} on its timeout rather than rejecting,
+        // so a failed rebuild reset the flag, every later tick bailed on the
+        // !everConnected guard, and the watchdog never fired again. One
+        // attempt, then permanent deafness — the exact disease it treats.
         zeroSince = null;
         currentPeer = result.peer;
 
@@ -165,8 +171,14 @@ export const PeerProvider = ({ children }) => {
         cleanup = null;
         currentPeer = null;
         await init();                      // rebuilds peer + setPeer → re-seats subs
-        if (currentPeer) {
-          retryDelayMs = RETRY_INITIAL_MS; // a successful rebuild re-arms fast retry
+        // Success means PEERS, not merely a peer object: connect() resolves
+        // with {ready:false, peers:0} on timeout, and a rebuild into an empty
+        // room is a failed attempt that must keep the backoff growing. The
+        // tick keeps retrying because everConnected survives; replay waits
+        // for a session that can actually deliver.
+        const meshPeers = currentPeer?.peers ? currentPeer.peers().length : 0;
+        if (meshPeers > 0) {
+          retryDelayMs = RETRY_INITIAL_MS; // real recovery re-arms fast retry
           AxonaChatClient.replayPendingSends();
         }
       } finally {
