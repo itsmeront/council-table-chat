@@ -87,14 +87,13 @@ export const PeerProvider = ({ children }) => {
           bridge: bridgeUrl,
           location,
           author: false,
-          ready: { minPeers: 1, timeoutMs: 8000 },
-          // Kernel 4.61.0's mesh gate counts LIVE WebRTC channels, but the
-          // ready wait above resolves off synaptome count — which the bridge
-          // seeds instantly, long before any channel binds. Without this
-          // opt-in, connect() throws MESH_UNREACHABLE at 0ms on every load
-          // (prod outage, 2026-08-07). This app has always started
-          // bridge-only and meshed in its own time; say so explicitly.
-          allowBridgeOnly: true
+          // Mesh-required semantics restored on kernel 4.61.2: the gate now
+          // waits for a live WebRTC bind within this same 8s deadline instead
+          // of judging at 0ms (the 2026-08-07 outage). The temporary
+          // allowBridgeOnly stopgap from v0.48.1 is deliberately gone — a
+          // node that truly cannot mesh should fail loud here, not chat into
+          // the void.
+          ready: { minPeers: 1, timeoutMs: 8000 }
         };
 
         const result = await connect(connectionOpts);
