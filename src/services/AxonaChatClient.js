@@ -375,11 +375,24 @@ class AxonaChatClient {
         // Confidential council channel (TASK-P-0003): decrypt-before-render. The topic
         // carries only sealed ciphertext; authorize the signer against the root-signed
         // registry, then unseal with the reader's non-extractable wrap key. FAIL CLOSED —
-        // anything that does not open (unknown signer, tamper, wrong recipient, no
-        // keyring) is hidden here, never reaching the render path.
+        // ciphertext never reaches the render path. An envelope that does NOT open renders
+        // as a LOCKED placeholder (isCouncilLocked): never the ciphertext and never a
+        // silent gap, so a reader can tell "I can't read this" apart from "nothing
+        // happened".
         if (isCouncilTopic(descriptor)) {
           const opened = await openCouncilEnvelope(envelope);
-          if (!opened.ok) return; // hide — ciphertext must never render
+          if (!opened.ok) {
+            useChatStore.getState().addEnvelope(getTopicId(descriptor), {
+              ...envelope,
+              message: {
+                isCouncilSealed: true,
+                isEncrypted: true,
+                isCouncilLocked: true,
+                councilLockedReason: opened.reason,
+              },
+            });
+            return;
+          }
           useChatStore.getState().addEnvelope(getTopicId(descriptor), {
             ...envelope,
             message: {

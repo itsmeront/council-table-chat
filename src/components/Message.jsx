@@ -8,6 +8,7 @@ import LinkPreview from './LinkPreview.jsx';
 import TopicLinkChip from './TopicLinkChip.jsx';
 import { isTopicLink, isAxonaName } from '../services/topicLink.js';
 import { extractUrls, isImageUrl, isYouTubeUrl, isAxonaNameUrl } from '../services/messageUrls.js';
+import { councilLockedHint } from '../services/council/councilLockedHint.js';
 
 // Long-message panel height: comfortably smaller than the viewport so a
 // single message can never dominate the list.
@@ -177,6 +178,68 @@ const Message = ({ envelope, activeTopic, onReply, onPrivateReply, level = 0 }) 
         hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'short',
       })
     : 'no timestamp';
+
+  // Locked council ciphertext (TASK-P-0003): this device could not open the
+  // message. Render a lock block — sender/time stay (they are public envelope
+  // metadata), the ciphertext never renders, and there is no silent gap.
+  if (payload.isCouncilLocked) {
+    return (
+      <div style={{
+        display: 'flex', flexDirection: 'column', gap: '0.25rem',
+        padding: '0.75rem', borderRadius: 'var(--radius)',
+        background: 'rgba(243, 156, 18, 0.06)',
+        border: '1px solid rgba(243, 156, 18, 0.35)',
+        borderLeft: '3px solid rgba(243, 156, 18, 0.6)',
+        marginBottom: '0.5rem',
+        animation: 'rise 0.25s ease-out'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 'bold', color: 'var(--color-text)', fontSize: '0.85rem' }}>
+              {payload.handle || 'Anonymous'}
+            </span>
+            {badgeClass && (
+              <span style={{
+                fontSize: '0.6rem', padding: '1px 5px', borderRadius: '10px',
+                background: badgeClass === 'human' ? 'rgba(52, 152, 219, 0.15)' : 'rgba(155, 89, 182, 0.15)',
+                color: badgeClass === 'human' ? '#3498db' : '#9b59b6',
+                fontWeight: '600'
+              }}>
+                {badgeClass === 'human' ? 'HUMAN' : 'AGENT'}
+              </span>
+            )}
+            <span style={{
+              fontSize: '0.6rem', padding: '1px 5px', borderRadius: '10px',
+              background: 'rgba(243, 156, 18, 0.12)',
+              color: '#e67e22',
+              fontWeight: '600',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '2px'
+            }}>
+              🔒 ENCRYPTED
+            </span>
+            <span style={{ fontSize: '0.65rem', color: 'var(--color-muted)' }}>
+              {signerPubkey?.slice(0, 10)}...
+            </span>
+          </div>
+          <span style={{ fontSize: '0.7rem', color: 'var(--color-muted)' }} title={fullTimestamp}>
+            {formattedTime}
+          </span>
+        </div>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '0.5rem',
+          padding: '0.6rem 0.75rem', borderRadius: '4px',
+          background: 'rgba(243, 156, 18, 0.08)',
+          border: '1px dashed rgba(243, 156, 18, 0.4)',
+          color: 'var(--color-muted)', fontSize: '0.85rem', lineHeight: 1.4
+        }}>
+          <span style={{ fontSize: '1.1rem', flexShrink: 0 }}>🔒</span>
+          <span>{councilLockedHint(payload.councilLockedReason)}</span>
+        </div>
+      </div>
+    );
+  }
 
   // Handle Delete (Kill message)
   const handleDelete = async () => {
