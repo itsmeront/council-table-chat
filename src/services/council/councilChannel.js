@@ -11,6 +11,7 @@
 import { authorizeSigner } from './registry.js';
 import { openForReader } from './session.mjs';
 import { CouncilKeyring } from './CouncilKeyring.js';
+import { EPOCH_KIND, JOIN_KIND, verifyEpochAnnouncement, epochRecordFromAnnouncement } from './announce.mjs';
 
 const COUNCIL_TOPIC = 'OO.Private.Council';
 let registryPromise = null;
@@ -28,6 +29,10 @@ export async function loadRegistry() {
 
 export function __setKeyringProvider(fn) { keyringProvider = fn; }
 export function __setRegistryProvider(fn) { registryProvider = fn; }
+
+// Injectable in tests so the install path is observable without IndexedDB.
+let epochApplier = (epoch, record) => CouncilKeyring.applyEpoch(epoch, record);
+export function __setEpochApplier(fn) { epochApplier = fn; }
 
 /**
  * Pure read-side open: authorize the signer, then unseal for the reader. Testable
@@ -58,4 +63,40 @@ export async function tryOpenCached(envelope) {
   if (!keyring) return { ok: false, reason: 'keyring not provisioned' };
   const registry = await loadRegistry();
   return openSealedEnvelope(envelope, { registry, keyring });
+}
+
+/**
+ * Control-message intercept for the council topic — these are NEVER rendered as chat:
+ *   • council-epoch — a verified orchestrator epoch announcement. Auto-installs the
+ *     trimmed record into the keyring (rotation/membership changes arrive with NO manual
+ *     re-import). If the keyring isn't provisioned yet the announcement is dropped; backlog
+ *     replay (since:'all') re-delivers it on the next load, so a browser that joins late
+ *     still catches up.
+ *   • council-join — a join request (public material only): acknowledged, hidden.
+ * FAIL CLOSED: any malformed, unsigned, or mis-signed control message is dropped. The
+ * kernel-verified envelope signer must also match the inner `signer` field, binding the
+ * kernel Ed25519 signature to the inner signature over the record body.
+ * @returns {true} when the envelope WAS a control message (caller must not render it)
+ */
+export async function handleCouncilControl(envelope) {
+  let msg = envelope?.message;
+  if (typeof msg === 'string') { try { msg = JSON.parse(msg); } catch { return false; } }
+  if (!msg || typeof msg !== 'object') return false;
+  const kind = msg.kind;
+  if (kind === EPOCH_KIND) {
+    try {
+      if (envelope.signerPubkey && envelope.signerPubkey !== msg.signer) return true;
+      const registry = await loadRegistry();
+      const v = await verifyEpochAnnouncement(msg, registry);
+      if (!v.ok) return true;
+      let keyring;
+      try { keyring = await keyringProvider(); } catch { keyring = null; }
+      if (!keyring) return true;
+      const rec = epochRecordFromAnnouncement(msg, keyring.authorId);
+      await epochApplier(msg.epoch, rec);
+    } catch { /* drop on any failure */ }
+    return true;
+  }
+  if (kind === JOIN_KIND) return true;
+  return false;
 }

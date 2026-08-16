@@ -5,6 +5,7 @@ import Message from './Message.jsx';
 import AxonaChatClient from '../services/AxonaChatClient.js';
 import { usePeer } from '../contexts/PeerContext.jsx';
 import { buildTopicLink } from '../services/topicLink.js';
+import { isCouncilTopic } from '../services/council/councilChannel.js';
 
 const MessagePane = ({ onOpenModal, setReplyTarget, setPrivateReplyTarget }) => {
   const { activeTopic, activeTopicId, messages, currentHandle, moderationQueue, topicMetrics } = useChatStore();
@@ -182,6 +183,25 @@ const MessagePane = ({ onOpenModal, setReplyTarget, setPrivateReplyTarget }) => 
                 </span>
               );
             })()}
+            {/* Encrypted-channel indicator: this is the confidential council channel —
+                sealed before publish, opened only with the member keyring. */}
+            {isCouncilTopic(activeTopic) && (
+              <span
+                title="End-to-end encrypted council channel — messages are sealed before publish and can only be read by members holding the council keyring (OO.Private.Council)"
+                style={{
+                  fontSize: '0.6rem',
+                  padding: '1px 5px',
+                  borderRadius: '3px',
+                  background: 'rgba(243, 156, 18, 0.14)',
+                  color: '#e67e22',
+                  border: 'none',
+                  fontWeight: '600',
+                  letterSpacing: '0.03em'
+                }}
+              >
+                🔒 ENCRYPTED
+              </span>
+            )}
             <span
               title="How many messages this topic currently holds on the network ('…' means the count hasn't arrived yet)"
               style={{

@@ -54,6 +54,9 @@ const Modals = ({ activeModal, onClose }) => {
   const [councilStatus, setCouncilStatus] = useState(null); // { role, authorId, members, sessions } | null
   const [councilInput, setCouncilInput] = useState('');
   const [councilError, setCouncilError] = useState('');
+  const [councilJoin, setCouncilJoin] = useState(null); // { payload, msgId }
+  const [councilJoinBusy, setCouncilJoinBusy] = useState(false);
+  const [councilJoinErr, setCouncilJoinErr] = useState('');
 
   const refreshCouncilStatus = async () => {
     try {
@@ -108,6 +111,26 @@ const Modals = ({ activeModal, onClose }) => {
     if (!window.confirm('Remove this browser\'s council keyring? Your persona and its signed messages are unaffected — you can re-import a fresh export-keyring payload anytime.')) return;
     await CouncilKeyring.reset();
     await refreshCouncilStatus();
+  };
+
+  const handleJoinCouncil = async () => {
+    setCouncilJoinBusy(true);
+    setCouncilJoinErr('');
+    setCouncilJoin(null);
+    try {
+      const author = await AxonaChatClient.getActiveAuthor();
+      const handleName = currentHandle?.name || `member-${author.authorId.slice(0, 6)}`;
+      const { joinPayload } = await CouncilKeyring.selfMint({
+        role: 'council-member', handle: handleName, authorId: author.authorId, signFn: author.sign,
+      });
+      const msgId = await AxonaChatClient.publishCouncilJoinRequest(joinPayload);
+      await refreshCouncilStatus();
+      setCouncilJoin({ payload: joinPayload, msgId });
+    } catch (err) {
+      setCouncilJoinErr(err.message || 'Join failed — is a persona active?');
+    } finally {
+      setCouncilJoinBusy(false);
+    }
   };
 
   useEffect(() => {
@@ -414,12 +437,78 @@ const Modals = ({ activeModal, onClose }) => {
               </div>
             </form>
 
+            {!councilStatus && (
+              <div style={{
+                marginTop: '1rem', padding: '0.6rem 0.7rem',
+                background: 'var(--color-bg)', border: '1px dashed var(--border-color)',
+                borderRadius: '4px', fontSize: '0.8rem'
+              }}>
+                <div style={{ fontWeight: '600', marginBottom: '0.3rem' }}>
+                  New to the council? Join with your active persona
+                </div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', marginBottom: '0.5rem', lineHeight: '1.4' }}>
+                  This browser generates its own decrypt key — the private key never leaves the page.
+                  Your request carries only public material and is signed by your persona; an admin
+                  approves it, and the key then arrives here automatically.
+                </div>
+                <button
+                  onClick={handleJoinCouncil}
+                  disabled={councilJoinBusy}
+                  style={{
+                    ...btnStyle, background: 'var(--color-primary)', color: '#fff',
+                    border: 'none'
+                  }}
+                >
+                  {councilJoinBusy ? 'Joining…' : 'Join the council'}
+                </button>
+                {councilJoinErr && (
+                  <div style={{ color: '#ff6b6b', fontSize: '0.75rem', marginTop: '0.4rem' }}>{councilJoinErr}</div>
+                )}
+              </div>
+            )}
+
+            {councilJoin && (
+              <div style={{
+                marginTop: '1rem', padding: '0.6rem 0.7rem',
+                background: 'var(--color-bg)', border: '1px solid var(--color-success)',
+                borderRadius: '4px', fontSize: '0.78rem'
+              }}>
+                <div style={{ fontWeight: '600', marginBottom: '0.3rem' }}>
+                  ✅ Join request sent{currentHandle ? ` as ${currentHandle.name}` : ''}
+                </div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', lineHeight: '1.4' }}>
+                  It carries only your public key + signed binding — your private key stayed in this
+                  browser. Have an admin approve it, then reload this page: the council key arrives
+                  automatically and sealed messages become readable.
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.5rem' }}>
+                  <button
+                    onClick={() => {
+                      if (navigator.clipboard?.writeText) {
+                        navigator.clipboard.writeText(JSON.stringify(councilJoin.payload, null, 2))
+                          .then(() => setCouncilError('Join request copied — send it to an admin.')).catch(() => {});
+                      } else {
+                        window.prompt('Copy this join request:', JSON.stringify(councilJoin.payload));
+                      }
+                    }}
+                    style={{ ...btnStyle, fontSize: '0.7rem', padding: '0.25rem 0.6rem' }}
+                  >
+                    Copy join request
+                  </button>
+                  <span style={{ fontSize: '0.68rem', color: 'var(--color-muted)' }}>
+                    msgId {councilJoin.msgId?.slice(0, 16)}…
+                  </span>
+                </div>
+              </div>
+            )}
+
             <div style={{ fontSize: '0.7rem', color: 'var(--color-muted)', marginTop: '0.7rem', lineHeight: '1.4' }}>
-              To provision: on the platform run{' '}
+              To provision from the platform: run{' '}
               <span style={{ fontFamily: 'monospace' }}>node council/scripts/private-council.mjs export-keyring --role=&lt;role&gt; --out=council-keyring.json</span>{' '}
               and import the file here. The keyring is scoped to THIS device (IndexedDB, 0600-era trust
               boundary) — import the same payload on every browser that should read the council.
-              After a session rotation, re-export for the newest session.
+              Session rotations are delivered automatically (a signed epoch announcement installs the
+              newest key without a re-export).
             </div>
 
             {councilError && <div style={{ color: '#ff6b6b', fontSize: '0.8rem', marginTop: '0.5rem' }}>{councilError}</div>}

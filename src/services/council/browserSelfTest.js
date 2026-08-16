@@ -4,12 +4,14 @@
 // keyring (CouncilKeyring). Node's vitest suite covers the same logic but cannot exercise
 // IndexedDB or the served ESM graph; only a real browser can.
 import {
-  generateWrapKeypair, exportPublicJwk, exportPrivateJwk, __forceDhBackend,
+  generateWrapKeypair, exportPublicJwk, exportPrivateJwk, __forceDhBackend, bytesToHex, canonicalJson,
 } from './crypto-core.mjs';
+import { generateKeyPair as genEd, exportPublicKey as exportEd, sign as edSign } from './ed25519.js';
 import { SessionManager, openForReader } from './session.mjs';
-import { verifyRegistry } from './registry.js';
+import { verifyRegistry, canonicalBody } from './registry.js';
 import { sealForSend } from './councilSend.js';
 import { CouncilKeyring } from './CouncilKeyring.js';
+import { verifyEpochAnnouncement } from './announce.mjs';
 import knownHosts from './known-hosts.json';
 
 const TOPIC = 'OO.Private.Council';
@@ -91,6 +93,85 @@ export async function runBrowserSelfTest() {
   const memberOpen = await openForReader(memberEnv, { keyring: memKr, topic: TOPIC });
   check('member seal→open round trip in-browser (random-nonce writer)',
     memberOpen.ok === true && memberOpen.plaintext === 'MEMBER-WRITES-IN-BROWSER');
+
+  // ── AUTO KEY-DELIVERY (epoch announcements) in-browser, real IndexedDB: the join→approve
+  // →auto-install loop. The browser SELF-MINTS a keyring (private key stays here), publishes
+  // a public-only join request, the admin approves, and a signed epoch announcement then
+  // delivers the wrap-blob WITHOUT any manual keyring re-import.
+  const personaPair = await genEd({ extractable: true });
+  const personaId = bytesToHex(await exportEd(personaPair.publicKey));
+  const personaSign = (bytes) => edSign(personaPair.privateKey, bytes);
+
+  const { keyring: minted, joinPayload } = await CouncilKeyring.selfMint({
+    role: 'member', handle: 'member', authorId: personaId, signFn: personaSign,
+  });
+  check('self-minted keyring is bound to the persona authorId', minted.authorId === personaId);
+  check('join request carries NO private key material (public-only wire payload)',
+    !JSON.stringify(joinPayload).includes('"private"'));
+
+  // Admin approval, simulated in-browser: orchestrator wraps the new member and mints an
+  // epoch, then signs an announcement with ITS OWN ed key (a synthetic registry is built
+  // and root-signed so the real verify path runs end-to-end).
+  const rootPair = await genEd({ extractable: true });
+  const orchPair = await genEd({ extractable: true });
+  const rootId = bytesToHex(await exportEd(rootPair.publicKey));
+  const orchId = bytesToHex(await exportEd(orchPair.publicKey));
+  const reg = {
+    schema: 'openopportunity/known-hosts/v1', root: rootId,
+    roles: {
+      orchestrator: { authorId: orchId, handle: 'orchestrator' },
+      member: { authorId: personaId, handle: 'member' },
+    },
+    signature: null,
+  };
+  reg.signature = {
+    signer: rootId,
+    ts: new Date().toISOString(),
+    sig: bytesToHex(await edSign(rootPair.privateKey, new TextEncoder().encode(canonicalBody(reg)))),
+  };
+  const regVer = await verifyRegistry(reg);
+  check(`synthetic registry verifies in-browser (${regVer.reason || 'ok'})`, regVer.ok === true);
+
+  const ownerA = await makeKeyring('orchestrator', orchId);
+  ownerA.data.members[personaId] = { role: 'member', authorId: personaId, x25519PublicJwk: joinPayload.x25519PublicJwk };
+  const smA = new SessionManager({ keyring: ownerA, topic: TOPIC });
+  const mintA = await smA.mintSession();
+  const epochA = mintA.epoch;
+  const recA = ownerA.data.sessions[epochA];
+
+  const envA = {
+    v: 1, kind: 'council-epoch', topic: TOPIC, epoch: epochA,
+    mintedAt: recA.mintedAt, salt: recA.salt, prefix: recA.prefix, counter: recA.counter,
+    archiveRef: null, unarchived: 0, consumed: false, wrapped: recA.wrapped,
+  };
+  envA.sigHex = bytesToHex(await edSign(orchPair.privateKey, new TextEncoder().encode(canonicalJson(envA))));
+  envA.signer = orchId;
+
+  const vA = await verifyEpochAnnouncement(envA, reg);
+  check('epoch announcement verifies in-browser (orchestrator-signed)', vA.ok === true);
+
+  // A forged announcement (signed by the member, not the orchestrator) must fail closed.
+  const envBad = { ...envA, signer: personaId, sigHex: bytesToHex(await personaSign(new TextEncoder().encode(canonicalJson({ ...envA, signer: personaId })))) };
+  const vBad = await verifyEpochAnnouncement(envBad, reg);
+  check('forged epoch announcement fails closed in-browser', vBad.ok === false);
+
+  const installed = await CouncilKeyring.applyEpoch(epochA, {
+    mintedAt: recA.mintedAt, salt: recA.salt, prefix: recA.prefix, counter: recA.counter,
+    archiveRef: null, unarchived: 0, consumed: false,
+    wrapped: { [personaId]: recA.wrapped[personaId] },
+  });
+  check('auto-installed epoch arrives in the keyring (no manual re-import)',
+    !!installed && installed.authorId === personaId && !!installed.getSession(epochA));
+
+  const sealedA = await smA.seal('AUTO-DELIVERED-KEY');
+  const openA = await openForReader(sealedA, { keyring: installed, topic: TOPIC });
+  check('message sealed after approval opens with the auto-installed key',
+    openA.ok === true && openA.plaintext === 'AUTO-DELIVERED-KEY');
+
+  const sealedB = await sealForSend('MEMBER-AFTER-AUTO-INSTALL', { keyring: installed, topic: TOPIC });
+  const openB = await openForReader(sealedB, { keyring: installed, topic: TOPIC });
+  check('member send after auto-install round-trips',
+    openB.ok === true && openB.plaintext === 'MEMBER-AFTER-AUTO-INSTALL');
 
   __forceDhBackend('p256');
   try {

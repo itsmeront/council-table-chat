@@ -5,6 +5,7 @@ import { useHandle } from '../contexts/HandleContext.jsx';
 import { usePeer } from '../contexts/PeerContext.jsx';
 import { useNetwork } from '../contexts/NetworkContext.jsx';
 import { useCompactLayout } from '../hooks/useCompactLayout.js';
+import { isCouncilTopic } from '../services/council/councilChannel.js';
 
 // Injected by Vite from package.json at build time.
 const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev';
@@ -13,7 +14,7 @@ const StatusFooter = ({ onOpenModal }) => {
   const { handles, activeHandle, setActiveHandleId, declaration, setDeclaration } = useHandle();
   const { status } = usePeer();
   const { bridgeUrl } = useNetwork();
-  const { theme, toggleTheme } = useChatStore();
+  const { theme, toggleTheme, activeTopic } = useChatStore();
   const [showHandlesList, setShowHandlesList] = useState(false);
 
   // Compact footer: drop the informational text (connection words, bridge host,
@@ -83,6 +84,27 @@ const StatusFooter = ({ onOpenModal }) => {
             </span>
           )}
         </div>
+
+        {/* Encrypted-channel indicator: the active topic is the confidential council
+            channel — end-to-end encrypted before publish, decrypted only with the
+            member keyring on this device. */}
+        {isCouncilTopic(activeTopic) && (
+          <span
+            title="You are in the confidential council channel — messages are end-to-end encrypted before they leave this device and can only be read by council members (OO.Private.Council)"
+            style={{
+              fontSize: '0.66rem',
+              padding: '2px 6px',
+              borderRadius: '3px',
+              background: 'rgba(243, 156, 18, 0.14)',
+              color: '#e67e22',
+              fontWeight: '700',
+              letterSpacing: '0.03em',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            🔒 ENCRYPTED
+          </span>
+        )}
 
         {!isMobile && <span style={{ color: 'var(--border-color)', opacity: 0.5 }}>|</span>}
 

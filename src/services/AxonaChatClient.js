@@ -2,7 +2,7 @@ import { deriveTopicId, createAuthorIdentity, metricTopic } from '@axona/protoco
 import { makeMessage } from '@axona/protocol/std/message.js';
 import { useChatStore } from '../stores/useChatStore.js';
 import CryptoService from './CryptoService.js';
-import { isCouncilTopic, tryOpenCached as openCouncilEnvelope, loadRegistry as loadCouncilRegistry } from './council/councilChannel.js';
+import { isCouncilTopic, tryOpenCached as openCouncilEnvelope, loadRegistry as loadCouncilRegistry, handleCouncilControl } from './council/councilChannel.js';
 import { sealForSend, assertCanSendCouncil } from './council/councilSend.js';
 import { CouncilKeyring } from './council/CouncilKeyring.js';
 // write defaults to 'open' to match the kernel's deriveTopicId — a
@@ -380,6 +380,10 @@ class AxonaChatClient {
         // silent gap, so a reader can tell "I can't read this" apart from "nothing
         // happened".
         if (isCouncilTopic(descriptor)) {
+          // Control messages (epoch announcements, join requests) are handled by the
+          // crypto layer and NEVER rendered — an epoch announcement auto-installs the new
+          // wrap-blob into the keyring, so rotation needs no manual re-import.
+          if (await handleCouncilControl(envelope)) return;
           const opened = await openCouncilEnvelope(envelope);
           if (!opened.ok) {
             useChatStore.getState().addEnvelope(getTopicId(descriptor), {
@@ -621,6 +625,24 @@ class AxonaChatClient {
       island: meshPeers === 0
     });
     return msgId;
+  }
+
+  /**
+   * Publish a council join request (control message, NEVER sealed and NEVER a chat message):
+   * public material only — the persona's authorId, role/handle, the freshly self-minted
+   * X25519 PUBLIC key, and the binding the persona signed over it. An admin's approve-join
+   * then delivers only the epoch wrap-blob encrypted TO this request's public key, so the
+   * X25519 private key never leaves this page.
+   */
+  async publishCouncilJoinRequest(joinPayload) {
+    if (!this.peer) throw new Error('Peer not connected.');
+    const activeAuthor = await this.getActiveAuthor();
+    const store = useChatStore.getState();
+    const descriptor =
+      (store.subscribedTopics || []).find((t) => t.name === joinPayload.topic && t.region === 'eagle') ||
+      { region: 'eagle', name: joinPayload.topic, write: 'open' };
+    const payload = JSON.stringify({ ...joinPayload, signer: activeAuthor.authorId });
+    return this.peer.pub(descriptor, payload, { signWith: activeAuthor });
   }
 
   // Re-publish every unconfirmed send on the (fresh) peer. Called after a
