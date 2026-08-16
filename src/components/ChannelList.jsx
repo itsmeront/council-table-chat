@@ -82,6 +82,13 @@ const ChannelList = ({ onOpenModal }) => {
               The real choice is the write policy, which is inside. */}
           <div style={{ display: 'flex', gap: '0.4rem' }}>
             <button
+              onClick={() => onOpenModal('council')}
+              style={{ padding: '2px 6px', fontSize: '0.7rem', background: 'rgba(46,204,113,0.15)', color: '#2ecc71', border: '1px solid rgba(46,204,113,0.4)' }}
+              title="Council encryption — import your keyring and read/write the sealed OO.Private.Council channel"
+            >
+              🔒 Council
+            </button>
+            <button
               onClick={() => onOpenModal('addTopic')}
               style={{ padding: '2px 6px', fontSize: '0.7rem', background: 'var(--color-primary-dark)', color: '#fff' }}
               title="Add a topic — type a name to open or start one, or paste a link or descriptor someone shared"

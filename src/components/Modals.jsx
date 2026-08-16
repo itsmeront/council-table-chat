@@ -8,6 +8,7 @@ import { resolveTopicInput, describeDescriptor, POLICY_OPTIONS } from '../servic
 import CryptoService from '../services/CryptoService.js';
 import { looksLikeBrowserName } from '../services/handleHints.js';
 import IdentityBackupPanel from './IdentityBackupPanel.jsx';
+import { CouncilKeyring } from '../services/council/CouncilKeyring.js';
 
 const Modals = ({ activeModal, onClose }) => {
   const { 
@@ -48,6 +49,66 @@ const Modals = ({ activeModal, onClose }) => {
   // Share QR/private channel generation
   const [shareUrl, setShareUrl] = useState('');
   const canvasRef = useRef(null);
+
+  // Council keyring provisioning
+  const [councilStatus, setCouncilStatus] = useState(null); // { role, authorId, members, sessions } | null
+  const [councilInput, setCouncilInput] = useState('');
+  const [councilError, setCouncilError] = useState('');
+
+  const refreshCouncilStatus = async () => {
+    try {
+      const kr = await CouncilKeyring.load();
+      setCouncilStatus(kr ? {
+        role: kr.role,
+        authorId: kr.authorId,
+        members: Object.keys(kr.data?.members || {}).length,
+        sessions: Object.keys(kr.data?.sessions || {}).length
+      } : null);
+    } catch {
+      setCouncilStatus(null);
+    }
+  };
+
+  useEffect(() => {
+    if (activeModal === 'council') refreshCouncilStatus();
+  }, [activeModal]);
+
+  const handleImportCouncil = async (e) => {
+    e.preventDefault();
+    if (!councilInput.trim()) { setCouncilError('Paste a council-keyring JSON payload first.'); return; }
+    setIsLoading(true);
+    setCouncilError('');
+    try {
+      await CouncilKeyring.provision(councilInput);
+      setCouncilInput('');
+      await refreshCouncilStatus();
+      onClose();
+    } catch (err) {
+      setCouncilError(err.message || 'Import failed — is this an export-keyring payload?');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCouncilFile = async (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    try {
+      const text = await f.text();
+      await CouncilKeyring.provision(text);
+      await refreshCouncilStatus();
+      onClose();
+    } catch (err) {
+      setCouncilError(err.message || 'Import failed — is this an export-keyring payload?');
+    }
+  };
+
+  const handleResetCouncil = async () => {
+    if (!window.confirm('Remove this browser\'s council keyring? Your persona and its signed messages are unaffected — you can re-import a fresh export-keyring payload anytime.')) return;
+    await CouncilKeyring.reset();
+    await refreshCouncilStatus();
+  };
 
   useEffect(() => {
     if (activeModal === 'share') {
@@ -289,7 +350,96 @@ const Modals = ({ activeModal, onClose }) => {
           </div>
         )}
 
-        {/* 3. Manage Handles Modal */}
+        {/* 3. Council Encryption Modal (TASK-P-0003) */}
+        {activeModal === 'council' && (
+          <div>
+            <h3 style={{ fontFamily: 'Outfit, sans-serif', marginBottom: '0.35rem' }}>🔒 Council Encryption</h3>
+            <p style={{ fontSize: '0.75rem', color: 'var(--color-muted)', marginTop: 0, marginBottom: '1rem' }}>
+              This browser's confidential-channel keyring. Messages on{' '}
+              <b>OO.Private.Council</b> are AES-GCM-sealed before publish — the relay only
+              ever carries ciphertext, and only a member with this role's keyring can open them.
+            </p>
+
+            <div style={{
+              background: 'var(--color-bg)', border: '1px solid var(--border-color)',
+              borderRadius: '4px', padding: '0.6rem 0.7rem', marginBottom: '1rem',
+              fontSize: '0.8rem', display: 'flex', flexDirection: 'column', gap: '0.15rem'
+            }}>
+              {councilStatus ? (
+                <>
+                  <div>Role: <b style={{ color: 'var(--color-primary)' }}>{councilStatus.role}</b></div>
+                  <div style={{ fontFamily: 'monospace', fontSize: '0.72rem', color: 'var(--color-muted)' }}>
+                    {councilStatus.authorId.slice(0, 16)}…
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)' }}>
+                    {councilStatus.members} member(s) · {councilStatus.sessions} session(s)
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)' }}>
+                    Decrypt key is non-extractable — this browser can use it, never read it.
+                  </div>
+                </>
+              ) : (
+                <div style={{ color: 'var(--color-muted)', fontStyle: 'italic' }}>
+                  No keyring provisioned in this browser yet.
+                </div>
+              )}
+            </div>
+
+            <form onSubmit={handleImportCouncil} style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
+              <div>
+                <label style={{ fontSize: '0.8rem', color: 'var(--color-muted)', display: 'block', marginBottom: '0.25rem' }}>
+                  Keyring payload (from the platform's <span style={{ fontFamily: 'monospace' }}>export-keyring</span> CLI)
+                </label>
+                <textarea
+                  placeholder='{ "kind": "council-keyring", … }'
+                  value={councilInput}
+                  onChange={(e) => setCouncilInput(e.target.value)}
+                  rows={5}
+                  style={{ ...inputStyle, fontFamily: 'monospace', fontSize: '0.7rem', resize: 'none' }}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center' }}>
+                <button type="submit" disabled={isLoading || !councilInput.trim()} style={btnStyle}>
+                  {isLoading ? 'Importing…' : 'Import keyring'}
+                </button>
+                <label style={{ fontSize: '0.75rem', color: 'var(--color-muted)', cursor: 'pointer' }}>
+                  or
+                  <input
+                    type="file"
+                    accept=".json,application/json"
+                    onChange={handleCouncilFile}
+                    style={{ marginLeft: '0.35rem', fontSize: '0.7rem' }}
+                  />
+                </label>
+              </div>
+            </form>
+
+            <div style={{ fontSize: '0.7rem', color: 'var(--color-muted)', marginTop: '0.7rem', lineHeight: '1.4' }}>
+              To provision: on the platform run{' '}
+              <span style={{ fontFamily: 'monospace' }}>node council/scripts/private-council.mjs export-keyring --role=&lt;role&gt; --out=council-keyring.json</span>{' '}
+              and import the file here. The keyring is scoped to THIS device (IndexedDB, 0600-era trust
+              boundary) — import the same payload on every browser that should read the council.
+              After a session rotation, re-export for the newest session.
+            </div>
+
+            {councilError && <div style={{ color: '#ff6b6b', fontSize: '0.8rem', marginTop: '0.5rem' }}>{councilError}</div>}
+
+            {councilStatus && (
+              <button
+                onClick={handleResetCouncil}
+                style={{
+                  marginTop: '1rem', background: 'transparent', color: '#e74c3c',
+                  border: '1px solid #e74c3c', borderRadius: '3px', padding: '0.35rem 0.8rem',
+                  fontSize: '0.72rem', cursor: 'pointer'
+                }}
+              >
+                Remove keyring from this browser
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* 4. Manage Handles Modal */}
         {activeModal === 'handles' && (
           <div>
             <h3 style={{ fontFamily: 'Outfit, sans-serif', marginBottom: '1rem' }}>Manage Personas</h3>

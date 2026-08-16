@@ -2,7 +2,9 @@ import { deriveTopicId, createAuthorIdentity, metricTopic } from '@axona/protoco
 import { makeMessage } from '@axona/protocol/std/message.js';
 import { useChatStore } from '../stores/useChatStore.js';
 import CryptoService from './CryptoService.js';
-import { isCouncilTopic, tryOpenCached as openCouncilEnvelope } from './council/councilChannel.js';
+import { isCouncilTopic, tryOpenCached as openCouncilEnvelope, loadRegistry as loadCouncilRegistry } from './council/councilChannel.js';
+import { sealForSend, assertCanSendCouncil } from './council/councilSend.js';
+import { CouncilKeyring } from './council/CouncilKeyring.js';
 // write defaults to 'open' to match the kernel's deriveTopicId — a
 // descriptor with and without an explicit write:'open' is the same topic
 // and must map to the same store id (must stay in sync with the copy in
@@ -510,6 +512,31 @@ class AxonaChatClient {
 
     // Load active author identity
     const activeAuthor = await this.getActiveAuthor();
+
+    // Confidential council channel (TASK-P-0003): a council topic carries ONLY sealed
+    // ciphertext — a plaintext std message on it is a leak, so the send path fails closed
+    // instead of publishing it. Gate: the signing persona must be a registry-known member,
+    // the keyring must be provisioned AND belong to that persona, and there must be an
+    // active session to seal under. The wire message is the raw envelope JSON string
+    // (matching the Node CLI's raw:true), so any reader — browser or CLI — sees the same shape.
+    if (isCouncilTopic(descriptor)) {
+      const registry = await loadCouncilRegistry();
+      const gate = await assertCanSendCouncil(activeAuthor.authorId, registry, () => CouncilKeyring.load());
+      if (!gate.ok) throw new Error(`council: ${gate.reason}`);
+      const sealEnv = await sealForSend(text, { keyring: gate.keyring, topic: descriptor.name });
+      const sealedPayload = JSON.stringify(sealEnv);
+      const msgId = await this.peer.pub(descriptor, sealedPayload, { signWith: activeAuthor });
+      const meshPeers = this.peer?.peers ? this.peer.peers().length : 0;
+      useChatStore.getState().markPendingSend(msgId, {
+        topicId: getTopicId(descriptor),
+        descriptor,
+        payload: sealedPayload,
+        authorRef: handle.authorRef,
+        at: Date.now(),
+        island: meshPeers === 0
+      });
+      return msgId;
+    }
 
     let targetDescriptor = descriptor;
     let payload;

@@ -4,10 +4,11 @@
 // keyring (CouncilKeyring). Node's vitest suite covers the same logic but cannot exercise
 // IndexedDB or the served ESM graph; only a real browser can.
 import {
-  generateWrapKeypair, exportPublicJwk, __forceDhBackend,
+  generateWrapKeypair, exportPublicJwk, exportPrivateJwk, __forceDhBackend,
 } from './crypto-core.mjs';
 import { SessionManager, openForReader } from './session.mjs';
 import { verifyRegistry } from './registry.js';
+import { sealForSend } from './councilSend.js';
 import { CouncilKeyring } from './CouncilKeyring.js';
 import knownHosts from './known-hosts.json';
 
@@ -66,6 +67,30 @@ export async function runBrowserSelfTest() {
   const reader = { authorId: architectId, getSession: (e) => owner.data.sessions[e] ?? null, privateKey: architect.privateKey };
   const opened = await openForReader(sealed, { keyring: reader, topic: TOPIC });
   check('seal→open round trip in-browser', opened.ok === true && opened.plaintext === 'BROWSER-SMOKE');
+
+  // ── member WRITE path: seal under the epoch session key with a per-message random nonce
+  // (councilSend.js), through a keyring PROVISIONED in IndexedDB. The browser's own
+  // encrypt-on-send is exactly this: sealForSend → peer.pub(JSON.stringify(env)).
+  const ownerM = await makeKeyring('orchestrator', mkHex());
+  const memPair = await generateWrapKeypair({ extractable: true });
+  const memPubJwk = await exportPublicJwk(memPair.publicKey);
+  const memPrivJwk = await exportPrivateJwk(memPair.privateKey);
+  const memId = mkHex();
+  ownerM.data.members[memId] = { role: 'member', authorId: memId, x25519PublicJwk: memPubJwk };
+  const smM = new SessionManager({ keyring: ownerM, topic: TOPIC });
+  await smM.mintSession();
+
+  await CouncilKeyring.provision({
+    kind: 'council-keyring', version: 1, role: 'member', authorId: memId,
+    members: { [memId]: { role: 'member', authorId: memId, x25519PublicJwk: memPubJwk } },
+    x25519: { public: memPubJwk, private: memPrivJwk },
+    sessions: ownerM.data.sessions,
+  });
+  const memKr = await CouncilKeyring.load();
+  const memberEnv = await sealForSend('MEMBER-WRITES-IN-BROWSER', { keyring: memKr, topic: TOPIC });
+  const memberOpen = await openForReader(memberEnv, { keyring: memKr, topic: TOPIC });
+  check('member seal→open round trip in-browser (random-nonce writer)',
+    memberOpen.ok === true && memberOpen.plaintext === 'MEMBER-WRITES-IN-BROWSER');
 
   __forceDhBackend('p256');
   try {

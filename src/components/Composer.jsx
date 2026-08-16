@@ -8,6 +8,7 @@ import { useHandle } from '../contexts/HandleContext.jsx';
 import AxonaChatClient from '../services/AxonaChatClient.js';
 import CryptoService from '../services/CryptoService.js';
 import { loadHistory, appendHistory, stepHistory, historyAt } from '../services/messageHistory.js';
+import { isCouncilTopic } from '../services/council/councilChannel.js';
 
 // Simple toolbar button
 const ToolbarButton = ({ onClick, label, active = false }) => (
@@ -488,7 +489,21 @@ const Composer = ({ replyTarget, privateReplyTarget, clearReplyTargets, onOpenMo
               </button>
             </div>
 
-            {/* Target status bar (Reply / Private Reply Indicator) */}
+        {/* Encrypted council channel indicator (TASK-P-0003): the message is sealed
+            with the member keyring before publish — the relay only ever carries ciphertext. */}
+        {isCouncilTopic(activeTopic) && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '0.35rem',
+            background: 'rgba(46,204,113,0.08)', borderLeft: '3px solid #2ecc71',
+            padding: '0.3rem 0.6rem', borderRadius: '4px', fontSize: '0.72rem',
+            color: 'var(--color-muted)', marginBottom: '0.4rem'
+          }}>
+            <span>🔒</span>
+            <span>Sealed before publish — only council members can read this.</span>
+          </div>
+        )}
+
+        {/* Target status bar (Reply / Private Reply Indicator) */}
             {(replyTarget || privateReplyTarget) && (
               <div style={{
                 display: 'flex',
