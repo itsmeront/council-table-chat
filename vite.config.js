@@ -7,10 +7,11 @@ import { readFileSync } from 'fs'
 const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'))
 
 export default defineConfig(() => ({
-  // Served at the domain root: the custom domain axona.chat fronts the
-  // GitHub Pages deployment (the old axona-net.github.io/axona-chat URL
-  // redirects there).
-  base: '/',
+  // Served by GitHub Pages under the project subpath (no custom domain on this
+  // fork): the built HTML must reference /council-table-chat/*, not root, or
+  // every asset 404s (the original axona.chat deployment used base '/' because
+  // a custom domain fronts that Pages site at the root).
+  base: '/council-table-chat/',
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version)
   },
@@ -52,11 +53,11 @@ export default defineConfig(() => ({
         theme_color: '#1C1A18',
         background_color: '#1C1A18',
         display: 'standalone',
-        start_url: '/',
+        start_url: '/council-table-chat/',
         icons: [
-          { src: '/pwa-192.png', sizes: '192x192', type: 'image/png' },
-          { src: '/pwa-512.png', sizes: '512x512', type: 'image/png' },
-          { src: '/pwa-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
+          { src: '/council-table-chat/pwa-192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/council-table-chat/pwa-512.png', sizes: '512x512', type: 'image/png' },
+          { src: '/council-table-chat/pwa-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
         ]
       }
     })
