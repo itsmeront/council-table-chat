@@ -2,6 +2,7 @@ import { deriveTopicId, createAuthorIdentity, metricTopic } from '@axona/protoco
 import { makeMessage } from '@axona/protocol/std/message.js';
 import { useChatStore } from '../stores/useChatStore.js';
 import CryptoService from './CryptoService.js';
+import { isCouncilTopic, tryOpenCached as openCouncilEnvelope } from './council/councilChannel.js';
 // write defaults to 'open' to match the kernel's deriveTopicId — a
 // descriptor with and without an explicit write:'open' is the same topic
 // and must map to the same store id (must stay in sync with the copy in
@@ -248,7 +249,7 @@ class AxonaChatClient {
       const isTicker = descriptor.name === this.tickerTopic.name;
       const isPresence = descriptor.name === this.heartbeatTopic.name;
 
-      const sub = await peer.sub(descriptor, (envelope) => {
+      const sub = await peer.sub(descriptor, async (envelope) => {
         // Send confirmation: our own envelope arriving counts as delivered
         // ONLY while the session has peers. On a zero-peer island the local
         // node roots the topic itself and echoes the publish straight back —
@@ -366,6 +367,27 @@ class AxonaChatClient {
               message: processedPayload
             });
           }
+          return;
+        }
+
+        // Confidential council channel (TASK-P-0003): decrypt-before-render. The topic
+        // carries only sealed ciphertext; authorize the signer against the root-signed
+        // registry, then unseal with the reader's non-extractable wrap key. FAIL CLOSED —
+        // anything that does not open (unknown signer, tamper, wrong recipient, no
+        // keyring) is hidden here, never reaching the render path.
+        if (isCouncilTopic(descriptor)) {
+          const opened = await openCouncilEnvelope(envelope);
+          if (!opened.ok) return; // hide — ciphertext must never render
+          useChatStore.getState().addEnvelope(getTopicId(descriptor), {
+            ...envelope,
+            message: {
+              ...(typeof envelope.message === 'object' && envelope.message !== null ? envelope.message : {}),
+              isCouncilSealed: true,
+              isEncrypted: true,
+              councilRole: opened.role,
+              decryptedText: opened.plaintext,
+            },
+          });
           return;
         }
 

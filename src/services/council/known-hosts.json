@@ -1,0 +1,59 @@
+{
+  "schema": "openopportunity/known-hosts/v1",
+  "root": "f10a698bf9760561d2780d843b59fe79a6180c7952ae3572ce6a54e39ed5ac41",
+  "roles": {
+    "architect": {
+      "authorId": "0147ba314a4d6a752cc3692e6481bd6c01ef8f91c35c5246227b9cd045674370",
+      "handle": "architect",
+      "class": "agent",
+      "operator": "ron",
+      "reviewer": true,
+      "added": "2026-08-14"
+    },
+    "security": {
+      "authorId": "947e9c88eb1f63cd15492cd9ff75e320b3c27b7ff3d5a751d8385744a143b227",
+      "handle": "security",
+      "class": "agent",
+      "operator": "ron",
+      "reviewer": true,
+      "added": "2026-08-14"
+    },
+    "test": {
+      "authorId": "7a655155bd1620d3a7d1cbca31ef9fb0c49840d6db150c648bcad5db75c29ba2",
+      "handle": "test",
+      "class": "agent",
+      "operator": "ron",
+      "reviewer": true,
+      "added": "2026-08-14"
+    },
+    "scribe": {
+      "authorId": "427f25f027e12ba0388aef8d652e73d6ccd099c38c68c8b66d9d3b5518df83d5",
+      "handle": "scribe",
+      "class": "agent",
+      "operator": "ron",
+      "reviewer": false,
+      "added": "2026-08-14"
+    },
+    "summarizer": {
+      "authorId": "0a96db649611e4afba09b65d26c7bab1b9b172c31e0d787579450d2b54172f75",
+      "handle": "summarizer",
+      "class": "agent",
+      "operator": "ron",
+      "reviewer": false,
+      "added": "2026-08-14"
+    },
+    "orchestrator": {
+      "authorId": "2643c662d55eeec68ff70404ee5cef9fa4c2c6f13284c8e3d20062c7a4b9c2f5",
+      "handle": "orchestrator",
+      "class": "agent",
+      "operator": "ron",
+      "reviewer": false,
+      "added": "2026-08-14"
+    }
+  },
+  "signature": {
+    "signer": "f10a698bf9760561d2780d843b59fe79a6180c7952ae3572ce6a54e39ed5ac41",
+    "ts": "2026-08-14T16:34:39.099Z",
+    "sig": "8657ad591911a57c57f2f359c1cbd0207bfc1cc6e0da292e3a05facfa075a3426e0d759710a255b21e4697a86fb2618b0bba3c992660bf3f342bb8c003a4250b"
+  }
+}

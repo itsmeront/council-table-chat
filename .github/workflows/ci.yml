@@ -1,0 +1,30 @@
+# Council channel (TASK-P-0003) test gate. The vitest suite includes the
+# decrypt-before-render tests: a sealed message either opens to plaintext with a
+# known role+handle, or is HIDDEN (unknown signer, tamper, wrong recipient, no
+# keyring). Also gates the kernel-pin (declared @axona/protocol pin == installed)
+# and lint. Runs on every push and pull request.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # --legacy-peer-deps: @testing-library/react@14 predates react 19; the dev
+      # tree installs the same way. Runtime deps are unaffected.
+      - run: npm ci --legacy-peer-deps
+      # GATE: declared pin must equal what npm ci installed.
+      - run: node check_kernel_pin.mjs
+      - run: npm run lint
+      - run: npm test
