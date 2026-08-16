@@ -5,9 +5,11 @@
 import { test, expect } from '@playwright/test';
 
 test('council crypto runs in real Chromium (self-test)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('./');
   const result = await page.evaluate(async () => {
-    const mod = await import('/src/services/council/browserSelfTest.js');
+    // Relative to the page (base '/council-table-chat/' in dev): resolves to
+    // <base>/src/services/council/browserSelfTest.js.
+    const mod = await import('./src/services/council/browserSelfTest.js');
     return mod.runBrowserSelfTest();
   });
   expect(result.ok, result.failures ? `failed in-browser: ${result.failures.join('; ')}` : '').toBe(true);

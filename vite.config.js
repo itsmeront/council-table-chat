@@ -82,7 +82,7 @@ export default defineConfig(() => ({
     // inflates, and a test can go green against a checkout nobody is editing.
     // Observed 2026-07-29 — 87 "passing" tests included duplicates of
     // CryptoService and composerLimits from two abandoned worktrees.
-    exclude: ['**/node_modules/**', '**/dist/**', '.claude/**'],
+    exclude: ['**/node_modules/**', '**/dist/**', '.claude/**', '**/e2e/**'],
     // Component tests need a DOM. Scoped by glob rather than set globally so
     // the service/store tests keep the faster node environment and their own
     // hand-built localStorage stub, which a jsdom global would shadow.
