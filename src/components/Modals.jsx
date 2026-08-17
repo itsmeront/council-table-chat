@@ -9,6 +9,7 @@ import CryptoService from '../services/CryptoService.js';
 import { looksLikeBrowserName } from '../services/handleHints.js';
 import IdentityBackupPanel from './IdentityBackupPanel.jsx';
 import { CouncilKeyring } from '../services/council/CouncilKeyring.js';
+import { flushEpochBuffer } from '../services/council/councilChannel.js';
 import { loadBestAvailableRegistry, verifyRegistry } from '../services/council/registry.js';
 
 const Modals = ({ activeModal, onClose }) => {
@@ -63,6 +64,8 @@ const Modals = ({ activeModal, onClose }) => {
 
   const refreshCouncilStatus = async () => {
     try {
+      // Flush any epoch announcements buffered before the keyring was provisioned
+      await flushEpochBuffer();
       const kr = await CouncilKeyring.load();
       setCouncilStatus(kr ? {
         role: kr.role,

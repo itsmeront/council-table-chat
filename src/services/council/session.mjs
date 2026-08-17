@@ -228,6 +228,8 @@ export class SessionManager {
  * Fails closed on: malformed envelope, no session record for the epoch, consumed epoch,
  * reader not a member (no wrap blob), tampered ciphertext, and nonce+epoch reuse.
  */
+const _sessionKeyCache = new Map(); // epoch → { sessionKey, importPromise }
+
 export async function openForReader(env, { keyring, topic, seen = new Map() }) {
   if (!env || typeof env !== 'object' || env.kind !== 'council-sealed' || !env.epoch || !env.nonce || !env.ct) {
     return { ok: false, reason: 'malformed envelope' };
@@ -242,11 +244,17 @@ export async function openForReader(env, { keyring, topic, seen = new Map() }) {
   const wrapped = rec.wrapped?.[keyring.authorId];
   if (!wrapped) return { ok: false, reason: 'reader is not a member of this epoch' };
 
-  const S = await unwrapSessionKey(wrapped, keyring.privateKey, { salt: b64ToBytes(rec.salt), info: wrapInfo(topic) });
-  if (!S) return { ok: false, reason: 'decrypt failed' };
+  // Cache the unwrapped session key per epoch — avoids re-deriving ECDH+HKDF for every message
+  let cached = _sessionKeyCache.get(env.epoch);
+  if (!cached) {
+    const S = await unwrapSessionKey(wrapped, keyring.privateKey, { salt: b64ToBytes(rec.salt), info: wrapInfo(topic) });
+    if (!S) return { ok: false, reason: 'decrypt failed' };
+    const sessionKey = await importSessionKey(S);
+    cached = { sessionKey };
+    _sessionKeyCache.set(env.epoch, cached);
+  }
 
-  const sessionKey = await importSessionKey(S);
-  const pt = await openWithKey(sessionKey, env.ct, { nonce: b64ToBytes(env.nonce), aad: aadFor(topic, env.epoch) });
+  const pt = await openWithKey(cached.sessionKey, env.ct, { nonce: b64ToBytes(env.nonce), aad: aadFor(topic, env.epoch) });
   if (pt === null) return { ok: false, reason: 'decrypt failed' };
 
   seen.set(key, env.ct);

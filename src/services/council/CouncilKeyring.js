@@ -126,7 +126,20 @@ export class CouncilKeyring {
     if (!epoch || !record || !record.salt || !record.wrapped) return null;
     const data = await kv('readonly', 'data');
     if (!data) return null;
-    await kv('readwrite', 'data', mergeEpochRecord(data, epoch, record));
+    mergeEpochRecord(data, epoch, record);
+    // Update members from the full member list (memberAuthorIds) passed through from
+    // the announcement. The trimmed record.wrapped only has self; the announcement had
+    // all members' blobs before epochRecordFromAnnouncement trimmed it.
+    const allIds = record.memberAuthorIds || Object.keys(record.wrapped);
+    if (allIds.length) {
+      data.members = data.members || {};
+      for (const authorId of allIds) {
+        if (!data.members[authorId]) {
+          data.members[authorId] = { authorId, role: authorId === data.authorId ? (data.role || 'member') : 'member', added: epoch };
+        }
+      }
+    }
+    await kv('readwrite', 'data', data);
     return CouncilKeyring.load();
   }
 

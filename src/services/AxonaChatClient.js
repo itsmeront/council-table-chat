@@ -404,6 +404,7 @@ class AxonaChatClient {
               isCouncilSealed: true,
               isEncrypted: true,
               councilRole: opened.role,
+              councilHandle: opened.handle,
               decryptedText: opened.plaintext,
             },
           });

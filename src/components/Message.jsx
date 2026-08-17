@@ -196,7 +196,7 @@ const Message = ({ envelope, activeTopic, onReply, onPrivateReply, level = 0 }) 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
             <span style={{ fontWeight: 'bold', color: 'var(--color-text)', fontSize: '0.85rem' }}>
-              {payload.handle || 'Anonymous'}
+            {payload.councilHandle || payload.handle || 'Anonymous'}
             </span>
             {badgeClass && (
               <span style={{
@@ -348,7 +348,7 @@ const Message = ({ envelope, activeTopic, onReply, onPrivateReply, level = 0 }) 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
           <span style={{ fontWeight: 'bold', color: isOwn ? 'var(--color-primary)' : 'var(--color-text)', fontSize: '0.85rem' }}>
-            {payload.handle || 'Anonymous'}
+            {payload.councilHandle || payload.handle || 'Anonymous'}
           </span>
           
           {/* Badge the VERIFIED author-class (signed attestation), when declared.

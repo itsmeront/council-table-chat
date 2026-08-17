@@ -48,12 +48,24 @@ export async function loadRegistry() {
   return loadBestAvailableRegistry(bundled);
 }
 
-export function __setKeyringProvider(fn) { keyringProvider = fn; }
-export function __setRegistryProvider(fn) { registryProvider = fn; }
+export function __setKeyringProvider(fn) { keyringProvider = fn; invalidateKeyringCache(); }
+export function __setRegistryProvider(fn) { registryProvider = fn; invalidateRegistryCache(); }
 
 // Injectable in tests so the install path is observable without IndexedDB.
 let epochApplier = (epoch, record) => CouncilKeyring.applyEpoch(epoch, record);
 export function __setEpochApplier(fn) { epochApplier = fn; }
+
+// Buffer for epoch announcements that arrive before the keyring is provisioned.
+// During backlog replay, the browser subscribes with since:'all' BEFORE the user
+// provisions the keyring (selfMint). These announcements are verified but can't be
+// installed yet — buffer them and flush when the keyring becomes available.
+const _pendingEpochs = [];
+export function flushEpochBuffer() {
+  if (!_pendingEpochs.length) return Promise.resolve();
+  const epochs = _pendingEpochs.splice(0);
+  return epochs.reduce((p, { epoch, rec }) => p.then(() => epochApplier(epoch, rec)), Promise.resolve());
+}
+export function __getPendingEpochs() { return _pendingEpochs; }
 
 /**
  * Pure read-side open: authorize the signer, then unseal for the reader. Testable
@@ -78,11 +90,50 @@ export async function openSealedEnvelope(envelope, { registry, keyring, topic = 
  * registry, then run the two gates. Used by the AxonaChatClient sub callback BEFORE
  * addEnvelope, so ciphertext never reaches the render path on failure.
  */
+let _cachedKeyring = null;
+let _cachedKeyringPromise = null;
+let _cachedRegistry = null;
+let _cachedRegistryPromise = null;
+
+async function getCachedKeyring() {
+  if (_cachedKeyring) return _cachedKeyring;
+  if (_cachedKeyringPromise) return _cachedKeyringPromise;
+  _cachedKeyringPromise = (async () => {
+    try {
+      _cachedKeyring = await keyringProvider();
+      // Flush any epoch announcements that were buffered before the keyring was provisioned.
+      if (_cachedKeyring && _pendingEpochs.length) {
+        await flushEpochBuffer();
+        invalidateKeyringCache();
+        _cachedKeyring = await keyringProvider();
+      }
+    } catch { _cachedKeyring = null; }
+    _cachedKeyringPromise = null;
+    return _cachedKeyring;
+  })();
+  return _cachedKeyringPromise;
+}
+
+async function getCachedRegistry() {
+  if (_cachedRegistry) return _cachedRegistry;
+  if (_cachedRegistryPromise) return _cachedRegistryPromise;
+  _cachedRegistryPromise = (async () => {
+    try {
+      _cachedRegistry = await loadRegistry();
+    } catch { _cachedRegistry = null; }
+    _cachedRegistryPromise = null;
+    return _cachedRegistry;
+  })();
+  return _cachedRegistryPromise;
+}
+
+export function invalidateKeyringCache() { _cachedKeyring = null; }
+export function invalidateRegistryCache() { _cachedRegistry = null; }
+
 export async function tryOpenCached(envelope) {
-  let keyring;
-  try { keyring = await keyringProvider(); } catch { return { ok: false, reason: 'keyring unavailable' }; }
-  if (!keyring) return { ok: false, reason: 'keyring not provisioned' };
-  const registry = await loadRegistry();
+  const keyring = await getCachedKeyring();
+  if (!keyring) return { ok: false, reason: keyring === null ? 'keyring unavailable' : 'keyring not provisioned' };
+  const registry = await getCachedRegistry();
   return openSealedEnvelope(envelope, { registry, keyring });
 }
 
@@ -112,9 +163,15 @@ export async function handleCouncilControl(envelope) {
       if (!v.ok) return true;
       let keyring;
       try { keyring = await keyringProvider(); } catch { keyring = null; }
-      if (!keyring) return true;
+      if (!keyring) {
+        // Keyring not provisioned yet (backlog replay before selfMint). Buffer the
+        // verified announcement so it can be installed when the keyring becomes available.
+        _pendingEpochs.push({ epoch: msg.epoch, msg });
+        return true;
+      }
       const rec = epochRecordFromAnnouncement(msg, keyring.authorId);
       await epochApplier(msg.epoch, rec);
+      invalidateKeyringCache();
     } catch { /* drop on any failure */ }
     return true;
   }
@@ -135,6 +192,7 @@ export async function handleCouncilControl(envelope) {
       if (v.signer !== bundled.root) return true;
       storeRegistry({ schema: msg.schema, root: msg.root, roles: msg.roles, signature: msg.signature });
       registryPromise = null; // clear cached promise so loadRegistry() picks up the new one
+      invalidateRegistryCache();
     } catch { /* drop on any failure */ }
     return true;
   }

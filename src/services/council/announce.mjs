@@ -65,9 +65,11 @@ export function epochRecordFromAnnouncement(env, ownAuthorId) {
   const wrapped = env.wrapped && env.wrapped[ownAuthorId]
     ? { [ownAuthorId]: env.wrapped[ownAuthorId] }
     : {};
+  // Full list of member authorIds from the announcement — used to populate keyring.members.
+  const memberAuthorIds = env.wrapped ? Object.keys(env.wrapped) : [];
   return {
     mintedAt: env.mintedAt, salt: env.salt, prefix: env.prefix, counter: env.counter,
     archiveRef: env.archiveRef ?? null, unarchived: env.unarchived ?? 0,
-    consumed: !!env.consumed, wrapped,
+    consumed: !!env.consumed, wrapped, memberAuthorIds,
   };
 }
