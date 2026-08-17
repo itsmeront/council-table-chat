@@ -13,6 +13,8 @@ import { openForReader } from './session.mjs';
 import { CouncilKeyring } from './CouncilKeyring.js';
 import { EPOCH_KIND, JOIN_KIND, REGISTRY_KIND, verifyEpochAnnouncement, epochRecordFromAnnouncement } from './announce.mjs';
 
+// Council topics follow the naming convention OO.Private.* — any topic with this
+// pattern is end-to-end encrypted and requires a council keyring to read/write.
 const COUNCIL_TOPIC = 'OO.Private.Council';
 let registryPromise = null;
 let keyringProvider = () => CouncilKeyring.load();
@@ -21,7 +23,21 @@ let registryProvider = () => {
   return registryPromise;
 };
 
-export const isCouncilTopic = (descriptor) => descriptor?.name === COUNCIL_TOPIC;
+export const isCouncilTopic = (descriptor) => {
+  const name = descriptor?.name;
+  if (!name) return false;
+  if (name === COUNCIL_TOPIC) return true;
+  // Generic pattern: OO.Private.* topics are encrypted council channels
+  return name.startsWith('OO.Private.');
+};
+
+/** Check if the topic is encrypted AND the browser has a keyring provisioned. */
+export async function hasCouncilKeyring() {
+  try {
+    const kr = await CouncilKeyring.load();
+    return !!kr;
+  } catch { return false; }
+}
 
 /**
  * Load the best available registry: a topic-delivered (stored) revision takes precedence

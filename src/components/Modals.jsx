@@ -390,11 +390,11 @@ const Modals = ({ activeModal, onClose }) => {
         {/* 3. Council Encryption Modal (TASK-P-0003) */}
         {activeModal === 'council' && (
           <div>
-            <h3 style={{ fontFamily: 'Outfit, sans-serif', marginBottom: '0.35rem' }}>🔒 Council Encryption</h3>
+            <h3 style={{ fontFamily: 'Outfit, sans-serif', marginBottom: '0.35rem' }}>🔒 Channel Keyring</h3>
             <p style={{ fontSize: '0.75rem', color: 'var(--color-muted)', marginTop: 0, marginBottom: '1rem' }}>
-              This browser's confidential-channel keyring. Messages on{' '}
-              <b>OO.Private.Council</b> are AES-GCM-sealed before publish — the relay only
-              ever carries ciphertext, and only a member with this role's keyring can open them.
+              This browser's confidential-channel keyring. Messages on encrypted channels are AES-GCM-sealed
+              before publish — the relay only ever carries ciphertext, and only a member with the keyring
+              can open them. Import a keyring to read, or join to request access.
             </p>
 
             <div style={{

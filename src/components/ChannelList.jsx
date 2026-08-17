@@ -1,6 +1,7 @@
 import React from 'react';
 import { useChatStore, getTopicId, countUnread } from '../stores/useChatStore.js';
 import AxonaChatClient from '../services/AxonaChatClient.js';
+import { isCouncilTopic } from '../services/council/councilChannel.js';
 
 const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev';
 
@@ -80,22 +81,13 @@ const ChannelList = ({ onOpenModal }) => {
               joining, and nothing records who arrived first — so "+ New" on an
               open name produced the very same topicId as "Join" on that name.
               The real choice is the write policy, which is inside. */}
-          <div style={{ display: 'flex', gap: '0.4rem' }}>
-            <button
-              onClick={() => onOpenModal('council')}
-              style={{ padding: '2px 6px', fontSize: '0.7rem', background: 'rgba(46,204,113,0.15)', color: '#2ecc71', border: '1px solid rgba(46,204,113,0.4)' }}
-              title="Council encryption — import your keyring and read/write the sealed OO.Private.Council channel"
-            >
-              🔒 Council
-            </button>
-            <button
-              onClick={() => onOpenModal('addTopic')}
-              style={{ padding: '2px 6px', fontSize: '0.7rem', background: 'var(--color-primary-dark)', color: '#fff' }}
-              title="Add a topic — type a name to open or start one, or paste a link or descriptor someone shared"
-            >
-              + Add topic
-            </button>
-          </div>
+          <button
+            onClick={() => onOpenModal('addTopic')}
+            style={{ padding: '2px 6px', fontSize: '0.7rem', background: 'var(--color-primary-dark)', color: '#fff' }}
+            title="Add a topic — type a name to open or start one, or paste a link or descriptor someone shared"
+          >
+            + Add topic
+          </button>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
@@ -124,11 +116,21 @@ const ChannelList = ({ onOpenModal }) => {
               >
                 <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: isActive ? '600' : '400' }}>
+                    {isCouncilTopic(topic) && (
+                      <span
+                        onClick={(e) => { e.stopPropagation(); onOpenModal('council'); }}
+                        title="Encrypted channel — click to manage keyring or request access"
+                        style={{
+                          cursor: 'pointer', fontSize: '0.7rem',
+                          color: '#e67e22', flexShrink: 0
+                        }}
+                      >🔒</span>
+                    )}
                     {getTopicLabel(topic)}
-                    <span style={{ 
-                      fontSize: '0.55rem', 
-                      padding: '1px 4px', 
-                      borderRadius: '2px', 
+                    <span style={{
+                      fontSize: '0.55rem',
+                      padding: '1px 4px',
+                      borderRadius: '2px',
                       background: topic.mode === 'moderated' ? '#e67e22' : topic.mode === 'controlled' ? '#9b59b6' : 'var(--color-bg)',
                       color: (topic.mode === 'open' || !topic.mode) ? 'var(--color-muted)' : '#fff',
                       border: (topic.mode === 'open' || !topic.mode) ? '1px solid var(--border-color)' : 'none',

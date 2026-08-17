@@ -5,7 +5,7 @@ import Message from './Message.jsx';
 import AxonaChatClient from '../services/AxonaChatClient.js';
 import { usePeer } from '../contexts/PeerContext.jsx';
 import { buildTopicLink } from '../services/topicLink.js';
-import { isCouncilTopic } from '../services/council/councilChannel.js';
+import { isCouncilTopic, hasCouncilKeyring } from '../services/council/councilChannel.js';
 
 const MessagePane = ({ onOpenModal, setReplyTarget, setPrivateReplyTarget }) => {
   const { activeTopic, activeTopicId, messages, currentHandle, moderationQueue, topicMetrics } = useChatStore();
@@ -36,6 +36,15 @@ const MessagePane = ({ onOpenModal, setReplyTarget, setPrivateReplyTarget }) => 
 
   const [copied, setCopied] = useState(false);
   const [activeHexId, setActiveHexId] = useState(null);
+  const [noKeyring, setNoKeyring] = useState(false);
+
+  // Check for keyring when switching to an encrypted topic
+  useEffect(() => {
+    if (!isCouncilTopic(activeTopic)) { setNoKeyring(false); return; }
+    let stale = false;
+    hasCouncilKeyring().then((has) => { if (!stale) setNoKeyring(!has); });
+    return () => { stale = true; };
+  }, [activeTopicId]);
   useEffect(() => {
     let stale = false;
     setActiveHexId(null);
@@ -187,7 +196,8 @@ const MessagePane = ({ onOpenModal, setReplyTarget, setPrivateReplyTarget }) => 
                 sealed before publish, opened only with the member keyring. */}
             {isCouncilTopic(activeTopic) && (
               <span
-                title="End-to-end encrypted council channel — messages are sealed before publish and can only be read by members holding the council keyring (OO.Private.Council)"
+                onClick={() => onOpenModal('council')}
+                title="Encrypted channel — click to manage keyring or request access"
                 style={{
                   fontSize: '0.6rem',
                   padding: '1px 5px',
@@ -196,7 +206,8 @@ const MessagePane = ({ onOpenModal, setReplyTarget, setPrivateReplyTarget }) => 
                   color: '#e67e22',
                   border: 'none',
                   fontWeight: '600',
-                  letterSpacing: '0.03em'
+                  letterSpacing: '0.03em',
+                  cursor: 'pointer'
                 }}
               >
                 🔒 ENCRYPTED
@@ -331,6 +342,47 @@ const MessagePane = ({ onOpenModal, setReplyTarget, setPrivateReplyTarget }) => 
         </div>
       </div>
 
+      {/* Request-access overlay: shown when the channel is encrypted but no keyring is provisioned */}
+      {isCouncilTopic(activeTopic) && noKeyring ? (
+        <div style={{
+          flex: 1, display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center',
+          padding: '2rem', gap: '0.8rem'
+        }}>
+          <span style={{ fontSize: '2.5rem' }}>🔒</span>
+          <div style={{
+            fontSize: '1rem', fontWeight: '600',
+            color: 'var(--color-text)', textAlign: 'center'
+          }}>
+            Private channel
+          </div>
+          <div style={{
+            fontSize: '0.82rem', color: 'var(--color-muted)',
+            textAlign: 'center', maxWidth: '340px', lineHeight: '1.5'
+          }}>
+            This channel is end-to-end encrypted. Only approved members can read or write messages.
+          </div>
+          <button
+            onClick={() => onOpenModal('council')}
+            style={{
+              marginTop: '0.5rem',
+              padding: '0.5rem 1.4rem',
+              background: 'var(--color-primary)', color: '#fff',
+              border: 'none', borderRadius: '4px',
+              fontSize: '0.85rem', fontWeight: '600',
+              cursor: 'pointer'
+            }}
+          >
+            🔑 Request access
+          </button>
+          <div style={{
+            fontSize: '0.7rem', color: 'var(--color-muted)',
+            textAlign: 'center', maxWidth: '300px', lineHeight: '1.4'
+          }}>
+            If you've already been approved, import your keyring to read messages.
+          </div>
+        </div>
+      ) : (
       {/* Message List area */}
       <div ref={listRef} onScroll={() => {
         const el = listRef.current;
@@ -400,6 +452,7 @@ const MessagePane = ({ onOpenModal, setReplyTarget, setPrivateReplyTarget }) => 
           </div>
         )}
       </div>
+      )}
     </div>
   );
 };
