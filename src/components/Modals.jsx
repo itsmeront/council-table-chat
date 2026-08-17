@@ -277,6 +277,8 @@ const Modals = ({ activeModal, onClose }) => {
       <div className="glass" style={{
         maxWidth: '500px',
         width: '100%',
+        maxHeight: '90vh',
+        overflowY: 'auto',
         padding: '2rem',
         animation: 'rise 0.3s ease-out',
         position: 'relative'
