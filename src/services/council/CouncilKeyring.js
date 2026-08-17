@@ -85,6 +85,11 @@ export class CouncilKeyring {
     if (data.kind !== 'council-keyring' || !data.authorId || !data.x25519?.private)
       throw new Error('keyring: not a council-keyring provision payload');
     await kv('readwrite', 'data', data);
+    // Restore persona key envelope if bundled (full backup import)
+    if (data.persona && data.authorId) {
+      const persistKey = `axona-author-council-${data.authorId.slice(0, 12)}`;
+      localStorage.setItem(persistKey, JSON.stringify(data.persona));
+    }
     return CouncilKeyring.load();
   }
 
@@ -101,6 +106,14 @@ export class CouncilKeyring {
       req.onsuccess = () => resolve();
       req.onerror = () => reject(req.error);
     });
+  }
+
+  /** Export the full keyring payload (JSON-serializable object).
+   *  If personaEnvelope is provided, it is bundled for cross-browser restore. */
+  exportPayload(personaEnvelope) {
+    const payload = JSON.parse(JSON.stringify(this.data));
+    if (personaEnvelope) payload.persona = personaEnvelope;
+    return payload;
   }
 
   /**

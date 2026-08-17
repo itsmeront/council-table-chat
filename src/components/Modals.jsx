@@ -59,6 +59,7 @@ const Modals = ({ activeModal, onClose }) => {
   const [councilJoinBusy, setCouncilJoinBusy] = useState(false);
   const [councilJoinErr, setCouncilJoinErr] = useState('');
   const [councilRegistry, setCouncilRegistry] = useState(null); // verified registry (roles/handles)
+  const [keyringCopied, setKeyringCopied] = useState(false);
 
   const refreshCouncilStatus = async () => {
     try {
@@ -125,6 +126,37 @@ const Modals = ({ activeModal, onClose }) => {
     if (!window.confirm('Remove this browser\'s council keyring? Your persona and its signed messages are unaffected — you can re-import a fresh export-keyring payload anytime.')) return;
     await CouncilKeyring.reset();
     await refreshCouncilStatus();
+  };
+
+  const handleExportKeyring = async () => {
+    try {
+      const kr = await CouncilKeyring.load();
+      if (!kr) return;
+      // Bundle persona key envelope for cross-browser restore
+      let personaEnvelope = null;
+      if (currentHandle?.authorRef) {
+        const raw = localStorage.getItem(currentHandle.authorRef);
+        if (raw) personaEnvelope = JSON.parse(raw);
+      }
+      const payload = kr.exportPayload(personaEnvelope);
+      const json = JSON.stringify(payload, null, 2);
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(json);
+        setKeyringCopied(true);
+        setTimeout(() => setKeyringCopied(false), 2000);
+      } else {
+        // Fallback: download as file
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `council-keyring-${kr.role || 'member'}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (err) {
+      setCouncilError(err.message || 'Export failed');
+    }
   };
 
   const handleJoinCouncil = async () => {
@@ -499,6 +531,8 @@ const Modals = ({ activeModal, onClose }) => {
               </div>
             )}
 
+            {/* Import form — hidden after join request (self-minted users don't need to import) */}
+            {!councilJoin && (
             <form onSubmit={handleImportCouncil} style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
               <div>
                 <label style={{ fontSize: '0.8rem', color: 'var(--color-muted)', display: 'block', marginBottom: '0.25rem' }}>
@@ -527,6 +561,7 @@ const Modals = ({ activeModal, onClose }) => {
                 </label>
               </div>
             </form>
+            )}
 
             {!councilStatus && (
               <div style={{
@@ -570,8 +605,7 @@ const Modals = ({ activeModal, onClose }) => {
                 <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', lineHeight: '1.4' }}>
                   Your request carries only your public key + signed binding — your private key stayed in this
                   browser. The council leader will review and approve it. Once approved, the session key
-                  arrives automatically (via a signed epoch announcement) and sealed messages become readable.
-                  No reload needed — backlog replay catches you up on the next load.
+                  arrives automatically and sealed messages become readable.
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.5rem' }}>
                   <button
@@ -591,9 +625,46 @@ const Modals = ({ activeModal, onClose }) => {
                     msgId {councilJoin.msgId?.slice(0, 16)}…
                   </span>
                 </div>
+
+                {/* Backup section — shown after join request */}
+                <div style={{
+                  marginTop: '0.8rem', padding: '0.55rem 0.7rem',
+                  background: 'rgba(243, 156, 18, 0.08)',
+                  border: '1px solid rgba(243, 156, 18, 0.3)',
+                  borderRadius: '4px', fontSize: '0.76rem'
+                }}>
+                  <div style={{ fontWeight: '600', marginBottom: '0.25rem', color: '#e67e22' }}>
+                    🔑 Back up your keyring now
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--color-muted)', lineHeight: '1.4', marginBottom: '0.5rem' }}>
+                    This browser's decrypt key and persona identity are stored locally. If you clear
+                    browser data or switch devices, you lose access. Export a backup and store it safely.
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <button
+                      onClick={handleExportKeyring}
+                      style={{ ...btnStyle, fontSize: '0.72rem', padding: '0.3rem 0.7rem' }}
+                    >
+                      {keyringCopied ? '✓ Copied!' : '📋 Export keyring + identity'}
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  onClick={onClose}
+                  style={{
+                    marginTop: '0.8rem', width: '100%',
+                    padding: '0.45rem', background: 'var(--color-primary)',
+                    color: '#fff', border: 'none', borderRadius: '4px',
+                    fontSize: '0.8rem', fontWeight: '600', cursor: 'pointer'
+                  }}
+                >
+                  Done
+                </button>
               </div>
             )}
 
+            {!councilJoin && (
             <div style={{ fontSize: '0.7rem', color: 'var(--color-muted)', marginTop: '0.7rem', lineHeight: '1.4' }}>
               To provision from the platform: run{' '}
               <span style={{ fontFamily: 'monospace' }}>node council/scripts/private-council.mjs export-keyring --role=&lt;role&gt; --out=council-keyring.json</span>{' '}
@@ -602,10 +673,11 @@ const Modals = ({ activeModal, onClose }) => {
               Session rotations are delivered automatically (a signed epoch announcement installs the
               newest key without a re-export).
             </div>
+            )}
 
             {councilError && <div style={{ color: '#ff6b6b', fontSize: '0.8rem', marginTop: '0.5rem' }}>{councilError}</div>}
 
-            {councilStatus && (
+            {councilStatus && !councilJoin && (
               <button
                 onClick={handleResetCouncil}
                 style={{
