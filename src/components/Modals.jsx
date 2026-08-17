@@ -677,7 +677,7 @@ const Modals = ({ activeModal, onClose }) => {
 
             {councilError && <div style={{ color: '#ff6b6b', fontSize: '0.8rem', marginTop: '0.5rem' }}>{councilError}</div>}
 
-            {councilStatus && !councilJoin && (
+            {councilStatus && (
               <button
                 onClick={handleResetCouncil}
                 style={{
