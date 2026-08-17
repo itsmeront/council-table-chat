@@ -140,20 +140,17 @@ const Modals = ({ activeModal, onClose }) => {
       }
       const payload = kr.exportPayload(personaEnvelope);
       const json = JSON.stringify(payload, null, 2);
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(json);
-        setKeyringCopied(true);
-        setTimeout(() => setKeyringCopied(false), 2000);
-      } else {
-        // Fallback: download as file
-        const blob = new Blob([json], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `council-keyring-${kr.role || 'member'}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-      }
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `council-keyring-${kr.role || 'member'}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setKeyringCopied(true);
+      setTimeout(() => setKeyringCopied(false), 2000);
     } catch (err) {
       setCouncilError(err.message || 'Export failed');
     }
@@ -645,7 +642,7 @@ const Modals = ({ activeModal, onClose }) => {
                       onClick={handleExportKeyring}
                       style={{ ...btnStyle, fontSize: '0.72rem', padding: '0.3rem 0.7rem' }}
                     >
-                      {keyringCopied ? '✓ Copied!' : '📋 Export keyring + identity'}
+                      {keyringCopied ? '✓ Downloaded' : '💾 Save keyring + identity'}
                     </button>
                   </div>
                 </div>
