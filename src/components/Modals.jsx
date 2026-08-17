@@ -422,8 +422,9 @@ const Modals = ({ activeModal, onClose }) => {
               )}
             </div>
 
-            {/* Known-hosts panel — member-only: shows the verified council registry */}
-            {councilStatus && councilRegistry && (
+            {/* Known-hosts panel — only shown AFTER approval (keyring has an active session/epoch).
+                Before approval the keyring exists but sessions is 0 — show pending state instead. */}
+            {councilStatus && councilStatus.sessions > 0 && councilRegistry && (
               <div style={{
                 marginTop: '0.8rem', padding: '0.6rem 0.7rem',
                 background: 'var(--color-bg)', border: '1px solid var(--border-color)',
@@ -474,6 +475,24 @@ const Modals = ({ activeModal, onClose }) => {
                       </span>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {/* Pending-approval state: keyring provisioned (self-minted) but no epoch yet */}
+            {councilStatus && councilStatus.sessions === 0 && (
+              <div style={{
+                marginTop: '0.8rem', padding: '0.6rem 0.7rem',
+                background: 'var(--color-bg)', border: '1px dashed var(--border-color)',
+                borderRadius: '4px', fontSize: '0.78rem'
+              }}>
+                <div style={{ fontWeight: '600', marginBottom: '0.3rem', color: '#e67e22' }}>
+                  ⏳ Waiting for approval
+                </div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', lineHeight: '1.4' }}>
+                  Your request has been sent. The council leader will review it and approve access.
+                  Once approved, the session key arrives automatically and messages become readable.
+                  No reload needed — the key is installed in the background.
                 </div>
               </div>
             )}
