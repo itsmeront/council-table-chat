@@ -383,7 +383,6 @@ const MessagePane = ({ onOpenModal, setReplyTarget, setPrivateReplyTarget }) => 
           </div>
         </div>
       ) : (
-      {/* Message List area */}
       <div ref={listRef} onScroll={() => {
         const el = listRef.current;
         if (!el) return;
