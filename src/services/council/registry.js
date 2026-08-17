@@ -47,6 +47,45 @@ export async function verifyRegistry(reg) {
   return good ? { ok: true, signer: reg.signature.signer } : { ok: false, reason: 'bad signature' };
 }
 
+// ── dynamic registry (from topic) ──────────────────────────────────────────
+// The council-registry control message carries a root-signed known-hosts on the topic
+// itself, so web clients auto-adopt the newest revision without a redeploy.  The static
+// bundle (imported by councilChannel.js) is the first-load bootstrap; a topic-delivered
+// revision stored here takes precedence.  localStorage is fine — the registry is PUBLIC.
+const REGISTRY_STORAGE_KEY = 'council-known-hosts-v1';
+
+/**
+ * Store a verified registry revision from the topic.  Only replaces if newer (ts).
+ */
+export function storeRegistry(reg) {
+  try {
+    const existing = loadStoredRegistry();
+    if (existing && existing.signature?.ts && reg.signature?.ts
+        && existing.signature.ts >= reg.signature.ts) return; // not newer
+    localStorage.setItem(REGISTRY_STORAGE_KEY, JSON.stringify(reg));
+  } catch { /* quota or parse */ }
+}
+
+/**
+ * Load the stored (topic-delivered) registry, or null if none yet.
+ */
+export function loadStoredRegistry() {
+  try { const s = localStorage.getItem(REGISTRY_STORAGE_KEY); return s ? JSON.parse(s) : null; }
+  catch { return null; }
+}
+
+/**
+ * Load the best available registry: topic-delivered (stored) preferred over the static
+ * bundle.  Both are verified independently by the caller before use.
+ * @param {object} bundled - The statically imported known-hosts.json (fallback).
+ */
+export function loadBestAvailableRegistry(bundled) {
+  const stored = loadStoredRegistry();
+  return stored || bundled;
+}
+
+// ── existing API ──────────────────────────────────────────────────────────
+
 /**
  * @returns {{ok:true, role, handle} | {ok:false, reason}}
  */

@@ -8,10 +8,10 @@
 //   2. openForReader — decrypt with the reader's own non-extractable wrap key.
 // FAIL CLOSED: a council message that fails either gate is HIDDEN, never rendered.
 // Non-council topics pass through untouched (this module is not consulted).
-import { authorizeSigner } from './registry.js';
+import { authorizeSigner, storeRegistry, loadBestAvailableRegistry, verifyRegistry } from './registry.js';
 import { openForReader } from './session.mjs';
 import { CouncilKeyring } from './CouncilKeyring.js';
-import { EPOCH_KIND, JOIN_KIND, verifyEpochAnnouncement, epochRecordFromAnnouncement } from './announce.mjs';
+import { EPOCH_KIND, JOIN_KIND, REGISTRY_KIND, verifyEpochAnnouncement, epochRecordFromAnnouncement } from './announce.mjs';
 
 const COUNCIL_TOPIC = 'OO.Private.Council';
 let registryPromise = null;
@@ -23,8 +23,13 @@ let registryProvider = () => {
 
 export const isCouncilTopic = (descriptor) => descriptor?.name === COUNCIL_TOPIC;
 
+/**
+ * Load the best available registry: a topic-delivered (stored) revision takes precedence
+ * over the statically bundled bootstrap.  Both are verified independently by callers.
+ */
 export async function loadRegistry() {
-  return registryProvider();
+  const bundled = await registryProvider();
+  return loadBestAvailableRegistry(bundled);
 }
 
 export function __setKeyringProvider(fn) { keyringProvider = fn; }
@@ -98,5 +103,24 @@ export async function handleCouncilControl(envelope) {
     return true;
   }
   if (kind === JOIN_KIND) return true;
+  if (kind === REGISTRY_KIND) {
+    // Root-signed registry revision arriving on the council topic.  Verify the embedded
+    // root signature, adopt if newer than the current revision (by signature.ts), and
+    // store so every subsequent loadRegistry() call picks it up.  Non-members can still
+    // publish to the topic, but a bad signature is silently dropped — the existing
+    // bundled bootstrap remains the fallback until a verified revision arrives.
+    try {
+      const v = await verifyRegistry({
+        schema: msg.schema, root: msg.root, roles: msg.roles, signature: msg.signature,
+      });
+      if (!v.ok) return true;
+      // Only accept revisions signed by the bootstrap root (trust anchor, never changes).
+      const bundled = await registryProvider();
+      if (v.signer !== bundled.root) return true;
+      storeRegistry({ schema: msg.schema, root: msg.root, roles: msg.roles, signature: msg.signature });
+      registryPromise = null; // clear cached promise so loadRegistry() picks up the new one
+    } catch { /* drop on any failure */ }
+    return true;
+  }
   return false;
 }

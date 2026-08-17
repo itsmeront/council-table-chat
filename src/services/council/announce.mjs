@@ -17,6 +17,7 @@ import { authorizeSigner } from './registry.js';
 
 export const EPOCH_KIND = 'council-epoch';
 export const JOIN_KIND = 'council-join';
+export const REGISTRY_KIND = 'council-registry';
 
 function recordBody(env) {
   return {
