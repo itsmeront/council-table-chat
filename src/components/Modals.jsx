@@ -10,7 +10,7 @@ import { looksLikeBrowserName } from '../services/handleHints.js';
 import IdentityBackupPanel from './IdentityBackupPanel.jsx';
 import { CouncilKeyring } from '../services/council/CouncilKeyring.js';
 import { flushEpochBuffer } from '../services/council/councilChannel.js';
-import { loadBestAvailableRegistry, verifyRegistry } from '../services/council/registry.js';
+
 
 const Modals = ({ activeModal, onClose }) => {
   const { 
@@ -59,7 +59,6 @@ const Modals = ({ activeModal, onClose }) => {
   const [councilJoin, setCouncilJoin] = useState(null); // { payload, msgId }
   const [councilJoinBusy, setCouncilJoinBusy] = useState(false);
   const [councilJoinErr, setCouncilJoinErr] = useState('');
-  const [councilRegistry, setCouncilRegistry] = useState(null); // verified registry (roles/handles)
   const [keyringCopied, setKeyringCopied] = useState(false);
 
   const refreshCouncilStatus = async () => {
@@ -71,22 +70,11 @@ const Modals = ({ activeModal, onClose }) => {
         role: kr.role,
         authorId: kr.authorId,
         members: Object.keys(kr.data?.members || {}).length,
+        memberDetails: kr.data?.members || {},
         sessions: Object.keys(kr.data?.sessions || {}).length
       } : null);
-      // Load the verified registry (topic-delivered preferred over static bundle)
-      if (kr) {
-        try {
-          const bundled = await import('../services/council/known-hosts.json').then((m) => m.default);
-          const reg = loadBestAvailableRegistry(bundled);
-          const v = await verifyRegistry(reg);
-          setCouncilRegistry(v.ok ? reg : null);
-        } catch { setCouncilRegistry(null); }
-      } else {
-        setCouncilRegistry(null);
-      }
     } catch {
       setCouncilStatus(null);
-      setCouncilRegistry(null);
     }
   };
 
@@ -456,56 +444,47 @@ const Modals = ({ activeModal, onClose }) => {
               )}
             </div>
 
-            {/* Known-hosts panel — only shown AFTER approval (keyring has an active session/epoch).
+            {/* Enrolled members panel — only shown AFTER approval (keyring has an active session/epoch).
                 Before approval the keyring exists but sessions is 0 — show pending state instead. */}
-            {councilStatus && councilStatus.sessions > 0 && councilRegistry && (
+            {councilStatus && councilStatus.sessions > 0 && (
               <div style={{
                 marginTop: '0.8rem', padding: '0.6rem 0.7rem',
                 background: 'var(--color-bg)', border: '1px solid var(--border-color)',
                 borderRadius: '4px', fontSize: '0.78rem'
               }}>
                 <div style={{ fontWeight: '600', marginBottom: '0.4rem', fontSize: '0.8rem' }}>
-                  Council Members
+                  Enrolled Members
                 </div>
                 <div style={{ fontSize: '0.68rem', color: 'var(--color-muted)', marginBottom: '0.4rem' }}>
-                  Root-signed registry — {Object.keys(councilRegistry.roles || {}).length} role(s) approved
+                  {councilStatus.members} member(s) · {councilStatus.sessions} session(s)
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                  {Object.entries(councilRegistry.roles || {}).map(([role, r]) => (
-                    <div key={role} style={{
+                  {Object.entries(councilStatus.memberDetails || {}).map(([authorId, m]) => (
+                    <div key={authorId} style={{
                       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                       padding: '0.2rem 0.35rem', borderRadius: '3px',
-                      background: r.revoked ? 'rgba(231,76,60,0.08)' : 'transparent',
-                      opacity: r.revoked ? 0.5 : 1,
                     }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                         <span style={{
                           fontFamily: 'monospace', fontSize: '0.72rem',
-                          color: r.revoked ? '#e74c3c' : 'var(--color-primary)',
+                          color: 'var(--color-primary)',
                           fontWeight: '600'
                         }}>
-                          {r.handle || role}
+                          {m.handle || authorId.slice(0, 12)}
                         </span>
-                        {r.reviewer && (
+                        {m.role && (
                           <span style={{
                             fontSize: '0.6rem', padding: '0.05rem 0.3rem',
                             background: 'var(--color-primary)', color: '#fff',
                             borderRadius: '2px', fontWeight: '500'
-                          }}>reviewer</span>
-                        )}
-                        {r.revoked && (
-                          <span style={{
-                            fontSize: '0.6rem', padding: '0.05rem 0.3rem',
-                            background: '#e74c3c', color: '#fff',
-                            borderRadius: '2px', fontWeight: '500'
-                          }}>revoked</span>
+                          }}>{m.role}</span>
                         )}
                       </div>
                       <span style={{
                         fontFamily: 'monospace', fontSize: '0.65rem',
                         color: 'var(--color-muted)'
                       }}>
-                        {r.authorId?.slice(0, 12)}…
+                        {authorId.slice(0, 12)}…
                       </span>
                     </div>
                   ))}
