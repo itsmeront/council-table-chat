@@ -114,7 +114,7 @@ async function getCachedKeyring() {
   return _cachedKeyringPromise;
 }
 
-async function getCachedRegistry() {
+export async function getCachedRegistry() {
   if (_cachedRegistry) return _cachedRegistry;
   if (_cachedRegistryPromise) return _cachedRegistryPromise;
   _cachedRegistryPromise = (async () => {

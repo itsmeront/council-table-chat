@@ -9,7 +9,7 @@ import CryptoService from '../services/CryptoService.js';
 import { looksLikeBrowserName } from '../services/handleHints.js';
 import IdentityBackupPanel from './IdentityBackupPanel.jsx';
 import { CouncilKeyring } from '../services/council/CouncilKeyring.js';
-import { flushEpochBuffer } from '../services/council/councilChannel.js';
+import { flushEpochBuffer, getCachedRegistry } from '../services/council/councilChannel.js';
 
 
 const Modals = ({ activeModal, onClose }) => {
@@ -66,13 +66,27 @@ const Modals = ({ activeModal, onClose }) => {
       // Flush any epoch announcements buffered before the keyring was provisioned
       await flushEpochBuffer();
       const kr = await CouncilKeyring.load();
-      setCouncilStatus(kr ? {
+      if (!kr) { setCouncilStatus(null); return; }
+      // Build authorId→handle lookup from the registry
+      const reg = await getCachedRegistry();
+      const roleMap = {};
+      if (reg?.roles) {
+        for (const [role, entry] of Object.entries(reg.roles)) {
+          if (entry.authorId) roleMap[entry.authorId] = role;
+        }
+      }
+      const members = kr.data?.members || {};
+      const memberDetails = {};
+      for (const [aid, m] of Object.entries(members)) {
+        memberDetails[aid] = { ...m, handle: roleMap[aid] || m.handle || aid.slice(0, 12) };
+      }
+      setCouncilStatus({
         role: kr.role,
         authorId: kr.authorId,
-        members: Object.keys(kr.data?.members || {}).length,
-        memberDetails: kr.data?.members || {},
+        members: Object.keys(members).length,
+        memberDetails,
         sessions: Object.keys(kr.data?.sessions || {}).length
-      } : null);
+      });
     } catch {
       setCouncilStatus(null);
     }
