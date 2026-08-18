@@ -63,7 +63,20 @@ const _pendingEpochs = [];
 export function flushEpochBuffer() {
   if (!_pendingEpochs.length) return Promise.resolve();
   const epochs = _pendingEpochs.splice(0);
-  return epochs.reduce((p, { epoch, rec }) => p.then(() => epochApplier(epoch, rec)), Promise.resolve());
+  return (async () => {
+    let keyring;
+    try { keyring = await keyringProvider(); } catch { keyring = null; }
+    if (!keyring) return; // still no keyring — abandon (replay on next load will re-deliver)
+    for (const { msg } of epochs) {
+      try {
+        const rec = epochRecordFromAnnouncement(msg, keyring.authorId);
+        await epochApplier(msg.epoch, rec);
+      } catch (e) {
+        console.warn('[council] flushEpochBuffer install failed for epoch', msg?.epoch, e?.message);
+      }
+    }
+    invalidateKeyringCache();
+  })();
 }
 export function __getPendingEpochs() { return _pendingEpochs; }
 
@@ -157,22 +170,27 @@ export async function handleCouncilControl(envelope) {
   const kind = msg.kind;
   if (kind === EPOCH_KIND) {
     try {
-      if (envelope.signerPubkey && envelope.signerPubkey !== msg.signer) return true;
+      if (envelope.signerPubkey && envelope.signerPubkey !== msg.signer) {
+        console.warn('[council] epoch envelope dropped: envelope signer', envelope.signerPubkey, '!= msg.signer', msg.signer);
+        return true;
+      }
       const registry = await loadRegistry();
       const v = await verifyEpochAnnouncement(msg, registry);
-      if (!v.ok) return true;
+      if (!v.ok) { console.warn('[council] epoch verify failed:', v.reason); return true; }
       let keyring;
       try { keyring = await keyringProvider(); } catch { keyring = null; }
       if (!keyring) {
         // Keyring not provisioned yet (backlog replay before selfMint). Buffer the
         // verified announcement so it can be installed when the keyring becomes available.
-        _pendingEpochs.push({ epoch: msg.epoch, msg });
+        _pendingEpochs.push({ msg });
+        console.log('[council] epoch', msg.epoch, 'verified — buffered (no keyring yet, pending:', _pendingEpochs.length, ')');
         return true;
       }
       const rec = epochRecordFromAnnouncement(msg, keyring.authorId);
       await epochApplier(msg.epoch, rec);
       invalidateKeyringCache();
-    } catch { /* drop on any failure */ }
+      console.log('[council] epoch', msg.epoch, 'auto-installed (members:', Object.keys(rec.memberAuthorIds || rec.wrapped || {}).length, ')');
+    } catch (e) { console.warn('[council] epoch install error:', e?.message); }
     return true;
   }
   if (kind === JOIN_KIND) return true;
