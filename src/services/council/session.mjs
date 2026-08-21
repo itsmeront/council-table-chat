@@ -21,20 +21,21 @@ import {
   mintSessionKey, importSessionKey, sealWithKey, openWithKey,
   wrapSessionKey, unwrapSessionKey, importPublicJwk,
   hexToBytes, bytesToB64, b64ToBytes,
-  verifyMember,
+  verifyMember, deriveNoncePrefix,
 } from './crypto-core.mjs';
 
 const encode = (s) => new TextEncoder().encode(s);
 const decode = (u) => new TextDecoder().decode(u);
 
 export const wrapInfo = (topic) => encode(`${SCHEMA_WRAP}|${topic}`);
-export const aadFor = (topic, epoch) => encode(`${SCHEMA_SEAL}|${topic}|${epoch}`);
+export const aadFor = (topic, epoch, authorId) => encode(`${SCHEMA_SEAL}|${topic}|${epoch}|${authorId}`);
+export const legacyAadFor = (topic, epoch) => encode(`${SCHEMA_SEAL}|${topic}|${epoch}`);
 
-function nonceFrom(prefixHex, counter) {
+export function nonceFrom(prefixHex, counter) {
   const out = new Uint8Array(12);
-  out.set(hexToBytes(prefixHex), 0);
+  out.set(hexToBytes(prefixHex), 0);          // bytes 0-7: per-sender prefix
   let v = BigInt(counter);
-  for (let i = 11; i >= 4; i--) { out[i] = Number(v & 0xffn); v >>= 8n; }
+  for (let i = 11; i >= 8; i--) { out[i] = Number(v & 0xffn); v >>= 8n; }  // bytes 8-11: counter
   return out;
 }
 
@@ -132,18 +133,22 @@ export class SessionManager {
   }
 
   /** Seal plaintext into a channel envelope. Uniqueness of (epoch, nonce) is by
-   *  construction — the counter is persisted with the session record (case 3). */
+   *  construction — per-sender prefix derived via HKDF + per-sender counter (§18 fix). */
   async seal(plaintext) {
     if (!this.activeEpoch || !this.activeS) throw new Error('session: no active epoch (mintSession() first)');
     const rec = this.keyring.getSession(this.activeEpoch);
+    const senderPrefix = await deriveNoncePrefix(this.activeS, {
+      salt: b64ToBytes(rec.salt),
+      authorId: this.keyring.authorId,
+    });
     rec.counter += 1;
     rec.unarchived += 1;
-    const nonce = nonceFrom(rec.prefix, rec.counter);
+    const nonce = nonceFrom(senderPrefix, rec.counter);
     const sessionKey = await importSessionKey(this.activeS);
-    const ct = await sealWithKey(sessionKey, encode(plaintext), { nonce, aad: aadFor(this.topic, this.activeEpoch) });
+    const ct = await sealWithKey(sessionKey, encode(plaintext), { nonce, aad: aadFor(this.topic, this.activeEpoch, this.keyring.authorId) });
     this.keyring.setSession(this.activeEpoch, rec);
     this.keyring.save();
-    return { v: 1, kind: 'council-sealed', topic: this.topic, epoch: this.activeEpoch, nonce: bytesToB64(nonce), ct };
+    return { v: 1, kind: 'council-sealed', topic: this.topic, epoch: this.activeEpoch, nonce: bytesToB64(nonce), sender: this.keyring.authorId, ct };
   }
 
   /** Reader-side open (wrap-key holder reading its own topic). Delegates to openForReader
@@ -254,7 +259,8 @@ export async function openForReader(env, { keyring, topic, seen = new Map() }) {
     _sessionKeyCache.set(env.epoch, cached);
   }
 
-  const pt = await openWithKey(cached.sessionKey, env.ct, { nonce: b64ToBytes(env.nonce), aad: aadFor(topic, env.epoch) });
+  const pt = await openWithKey(cached.sessionKey, env.ct, { nonce: b64ToBytes(env.nonce),
+    aad: ('sender' in env && env.sender) ? aadFor(topic, env.epoch, env.sender) : legacyAadFor(topic, env.epoch) });
   if (pt === null) return { ok: false, reason: 'decrypt failed' };
 
   seen.set(key, env.ct);

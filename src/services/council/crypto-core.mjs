@@ -35,6 +35,7 @@ function b64FromBytes(u) { let s = ''; for (let i = 0; i < u.length; i++) s += S
 function bytesFromB64(s) { const bin = atob(s); const out = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; }
 export const bytesToB64 = (u) => b64FromBytes(u instanceof Uint8Array ? u : new Uint8Array(u));
 export const b64ToBytes = (s) => bytesFromB64(s);
+const encode = (s) => new TextEncoder().encode(s);
 
 // Canonical, key-sorted serialization — the exact bytes the binding signature covers.
 export function canonicalJson(o) {
@@ -111,6 +112,22 @@ export async function deriveWrapKey(sharedBytes, { salt, info }) {
     false,
     ['encrypt', 'decrypt'],
   );
+}
+
+/**
+ * Derive a per-sender nonce prefix from the session key + authorId.
+ * Returns 8 bytes (hex string) — enough namespace to avoid collisions.
+ * This replaces the shared per-epoch prefix that caused nonce reuse (§18).
+ */
+export async function deriveNoncePrefix(sessionKeyBytes, { salt, authorId }) {
+  const info = encode(`nonce-prefix|${authorId}`);
+  const base = await crypto.subtle.importKey('raw', sessionKeyBytes, { name: 'HKDF' }, false, ['deriveBits']);
+  const derived = new Uint8Array(await crypto.subtle.deriveBits(
+    { name: 'HKDF', hash: 'SHA-256', salt, info },
+    base,
+    64, // 8 bytes = 64 bits
+  ));
+  return bytesToHex(derived);
 }
 
 /** TEST ONLY: import the raw ECDH output directly as an AES key — proves the real
