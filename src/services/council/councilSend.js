@@ -48,14 +48,16 @@ export async function activeEpochSession(keyring) {
 }
 
 /**
- * Seal plaintext into a council-channel envelope as a member writer. Throws on anything
- * that would produce an undecryptable or unauthorized message (no active session, not a
- * member of the epoch, unwrap failure).
+ * Seal plaintext into a council-channel envelope as a member writer. Uses a 96-bit random
+ * nonce (member writers don't share the orchestrator's per-epoch counter — each browser
+ * member's snapshot is a stale read; sharing a counter is how nonce reuse bites), but the
+ * AAD/topic/epoch binding is unchanged. Authored with `sender: authorId` so readers route
+ * to legacyAadFor or sender-AAD cleanly (§18).
  *
  * @param {string} plaintext
  * @param {{keyring: object, topic?: string}} opts  keyring implements openForReader's
  *        interface (authorId, privateKey, getSession) — see CouncilKeyring.
- * @returns {{v:1, kind:'council-sealed', topic, epoch, nonce, ct}}
+ * @returns {{v:1, kind:'council-sealed', topic, epoch, nonce, sender, ct}}
  */
 export async function sealForSend(plaintext, { keyring, topic = COUNCIL_TOPIC }) {
   const act = await activeEpochSession(keyring, topic);
@@ -71,9 +73,9 @@ export async function sealForSend(plaintext, { keyring, topic = COUNCIL_TOPIC })
   const sessionKey = await importSessionKey(S);
   const nonce = randomNonce();
   const ct = await sealWithKey(sessionKey, new TextEncoder().encode(plaintext), {
-    nonce, aad: aadFor(topic, act.epoch),
+    nonce, aad: aadFor(topic, act.epoch, keyring.authorId),
   });
-  return { v: 1, kind: 'council-sealed', topic, epoch: act.epoch, nonce: bytesToB64(nonce), ct };
+  return { v: 1, kind: 'council-sealed', topic, epoch: act.epoch, nonce: bytesToB64(nonce), sender: keyring.authorId, ct };
 }
 
 /**
