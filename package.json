@@ -15,7 +15,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@axona/protocol": "github:axona-net/axona-protocol#v4.61.2",
+    "@axona/protocol": "github:axona-net/axona-protocol#v4.84.0",
     "@tiptap/markdown": "^3.28.0",
     "@tiptap/react": "^3.28.0",
     "@tiptap/starter-kit": "^3.28.0",
